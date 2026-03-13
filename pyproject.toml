@@ -7,4 +7,5 @@ dependencies = [
     "pytest>=9.0.2",
 ]
 
-[tool.pytest]
+[tool.pytest.ini_options]
+addopts = ["--threaded", "auto"]

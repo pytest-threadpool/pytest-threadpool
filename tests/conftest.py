@@ -4,13 +4,13 @@ pytest-threaded: Parallel test execution for free-threaded Python.
 Runs test *bodies* concurrently in a ThreadPoolExecutor while keeping
 fixture setup/teardown sequential (pytest internals are not thread-safe).
 
-Mark tests for parallel execution:
+Mark tests for parallel execution (import from tests.markers for IDE hints):
 
-    @pytest.mark.parallelizable("children")    # methods/functions run in parallel
-    @pytest.mark.parallelizable("parameters")  # parametrized variants run in parallel
-    @pytest.mark.parallelizable("all")         # children + parameters
+    @parallelizable("children")    # methods/functions run in parallel
+    @parallelizable("parameters")  # parametrized variants run in parallel
+    @parallelizable("all")         # children + parameters
 
-    @pytest.mark.not_parallelizable            # opt out of inherited parallelism
+    @not_parallelizable            # opt out of inherited parallelism
 
 The marker can be applied at function, class, module (pytestmark), or
 package (__init__.py pytestmark) level.

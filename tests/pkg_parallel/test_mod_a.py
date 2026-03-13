@@ -2,18 +2,16 @@
 
 import threading
 
-from tests.pkg_parallel import pkg_start, pkg_done, pkg_log, pkg_lock
+from tests.pkg_parallel._state import PkgState
 
 
 class TestClassA:
     def test_a1(self):
-        pkg_start.wait()
-        with pkg_lock:
-            pkg_log["a1"] = threading.current_thread().name
-        pkg_done.wait()
+        PkgState.start.wait()
+        PkgState.log["a1"] = threading.current_thread().name
+        PkgState.done.wait()
 
     def test_a2(self):
-        pkg_start.wait()
-        with pkg_lock:
-            pkg_log["a2"] = threading.current_thread().name
-        pkg_done.wait()
+        PkgState.start.wait()
+        PkgState.log["a2"] = threading.current_thread().name
+        PkgState.done.wait()

@@ -5,47 +5,42 @@ import time
 
 import pytest
 
-# ── tracking state shared across the module ──────────────────────────────
-_session_setup_count = 0
-_session_lock = threading.Lock()
-
-_module_setup_count = 0
-_module_lock = threading.Lock()
+from tests.markers import parallelizable
 
 
-# ── session-scoped fixture ───────────────────────────────────────────────
+# -- tracking state shared across fixtures --
+
+class _FixtureState:
+    session_setup_count = 0
+    module_setup_count = 0
+
+
+# -- session-scoped fixture --
 @pytest.fixture(scope="session")
 def session_resource():
-    global _session_setup_count
-    with _session_lock:
-        _session_setup_count += 1
-    return {"created_by": "session_resource", "call_count": _session_setup_count}
+    _FixtureState.session_setup_count += 1
+    return {"created_by": "session_resource", "call_count": _FixtureState.session_setup_count}
 
 
-# ── module-scoped fixture ───────────────────────────────────────────────
+# -- module-scoped fixture --
 @pytest.fixture(scope="module")
 def module_resource():
-    global _module_setup_count
-    with _module_lock:
-        _module_setup_count += 1
-    return {"created_by": "module_resource", "call_count": _module_setup_count}
+    _FixtureState.module_setup_count += 1
+    return {"created_by": "module_resource", "call_count": _FixtureState.module_setup_count}
 
 
-# ── class-scoped yield fixture ───────────────────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- class-scoped yield fixture --
+@parallelizable("children")
 class TestClassScopedYieldFixture:
     """Class-scoped yield fixture: setup once, teardown after all methods."""
 
     setup_teardown_log = []
-    log_lock = threading.Lock()
 
     @pytest.fixture(autouse=True, scope="class")
     def db_connection(self):
-        with self.log_lock:
-            self.setup_teardown_log.append("setup")
+        self.setup_teardown_log.append("setup")
         yield "fake_db_conn"
-        with self.log_lock:
-            self.setup_teardown_log.append("teardown")
+        self.setup_teardown_log.append("teardown")
 
     def test_a(self):
         time.sleep(0.1)
@@ -61,18 +56,16 @@ class TestClassScopedYieldFixture:
 
 
 @pytest.mark.parallel_only
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestClassScopedYieldFixtureVerify:
     """Verify class-scoped fixture is set up exactly once (parallel only)."""
 
     setup_count = []
-    log_lock = threading.Lock()
     barrier = threading.Barrier(3, timeout=10)
 
     @pytest.fixture(autouse=True, scope="class")
     def db_connection(self):
-        with self.log_lock:
-            self.setup_count.append(1)
+        self.setup_count.append(1)
         yield
 
     def test_a(self):
@@ -86,13 +79,12 @@ class TestClassScopedYieldFixtureVerify:
         self.barrier.wait()
 
 
-# ── autouse fixture at class scope with state ────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- autouse fixture at class scope with state --
+@parallelizable("children")
 class TestAutouseClassFixtureState:
     """Autouse class fixture that provides shared state to all methods."""
 
     shared_list = []
-    list_lock = threading.Lock()
 
     @pytest.fixture(autouse=True, scope="class")
     def init_shared(self):
@@ -102,18 +94,16 @@ class TestAutouseClassFixtureState:
         self.shared_list.append("finalized")
 
     def test_write_1(self):
-        with self.list_lock:
-            self.shared_list.append("w1")
+        self.shared_list.append("w1")
         assert "initialized" in self.shared_list
 
     def test_write_2(self):
-        with self.list_lock:
-            self.shared_list.append("w2")
+        self.shared_list.append("w2")
         assert "initialized" in self.shared_list
 
 
-# ── parameterized fixture ────────────────────────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- parameterized fixture --
+@parallelizable("children")
 class TestParameterizedFixture:
     """Parameterized class-scoped fixture expands into multiple test runs."""
 
@@ -128,8 +118,8 @@ class TestParameterizedFixture:
         assert variant in {"alpha", "beta", "gamma"}
 
 
-# ── multiple fixtures composed ───────────────────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- multiple fixtures composed --
+@parallelizable("children")
 class TestMultipleFixtures:
     """Combine session, module, and class fixtures in one test class."""
 
@@ -148,8 +138,8 @@ class TestMultipleFixtures:
         assert module_resource["call_count"] >= 1
 
 
-# ── yield fixture with cleanup verification ──────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- yield fixture with cleanup verification --
+@parallelizable("children")
 class TestYieldFixtureCleanup:
     """Verify that yield fixture teardown actually runs."""
 
@@ -168,22 +158,19 @@ class TestYieldFixtureCleanup:
         assert not self.cleanup_flag["cleaned"]
 
 
-# ── function-scoped fixture (per-test) ───────────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- function-scoped fixture (per-test) --
+@parallelizable("children")
 class TestFunctionScopedFixture:
     """Function-scoped fixtures get fresh values per test."""
 
     call_log = []
-    log_lock = threading.Lock()
 
     @pytest.fixture(autouse=True)
     def per_test_counter(self):
-        with self.log_lock:
-            idx = len(self.call_log)
-            self.call_log.append(f"setup_{idx}")
+        idx = len(self.call_log)
+        self.call_log.append(f"setup_{idx}")
         yield idx
-        with self.log_lock:
-            self.call_log.append(f"teardown_{idx}")
+        self.call_log.append(f"teardown_{idx}")
 
     def test_a(self, per_test_counter):
         assert isinstance(per_test_counter, int)

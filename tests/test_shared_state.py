@@ -4,18 +4,19 @@ import threading
 
 import pytest
 
+from tests.markers import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestThreadSafeDict:
-    """Mutate a shared dict from multiple threads and verify consistency."""
+    """Mutate a shared dict from multiple threads and verify consistency.
+    dict.__setitem__ is thread-safe in free-threaded Python."""
 
     shared = {}
-    lock = threading.Lock()
 
     def _write(self, key, value, iterations=1000):
         for i in range(iterations):
-            with self.lock:
-                self.shared[f"{key}_{i}"] = value + i
+            self.shared[f"{key}_{i}"] = value + i
 
     def test_writer_a(self):
         self._write("a", 0)
@@ -37,19 +38,17 @@ def test_thread_safe_dict_verify():
             assert d[key] == base + i
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestLockFreeCounter:
     """Concurrent local increments — each thread has its own counter."""
 
     results = {}
-    results_lock = threading.Lock()
 
     def _count(self, name, n=50_000):
         total = 0
         for _ in range(n):
             total += 1
-        with self.results_lock:
-            self.results[name] = total
+        self.results[name] = total
 
     def test_counter_a(self):
         self._count("a")
@@ -70,20 +69,18 @@ def test_lock_free_counter_verify():
 
 
 @pytest.mark.parallel_only
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestBarrierSync:
     """Use a barrier to prove tests truly run concurrently."""
 
     barrier = threading.Barrier(3, timeout=5)
     verify_barrier = threading.Barrier(3, timeout=5)
     arrived = {}
-    arrived_lock = threading.Lock()
 
     def _arrive_and_verify(self, name):
         # All three must reach the barrier within timeout or it fails
         self.barrier.wait()
-        with self.arrived_lock:
-            self.arrived[name] = True
+        self.arrived[name] = True
         # Second barrier: ensure all have written before verifying
         self.verify_barrier.wait()
         assert self.arrived == {"a": True, "b": True, "c": True}

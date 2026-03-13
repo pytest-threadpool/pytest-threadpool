@@ -5,21 +5,21 @@ import time
 
 import pytest
 
+from tests.markers import parallelizable
+
 @pytest.mark.parallel_only
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestParallelExecution:
     """Verify that test methods within a class actually run concurrently."""
 
     timestamps = {}
-    ts_lock = threading.Lock()
     barrier = threading.Barrier(3, timeout=10)
 
     def _timed_work(self, name):
         start = time.monotonic()
         time.sleep(0.5)
         end = time.monotonic()
-        with self.ts_lock:
-            self.timestamps[name] = (start, end, threading.current_thread().name)
+        self.timestamps[name] = (start, end, threading.current_thread().name)
         # Wait for all 3 to finish, then verify
         self.barrier.wait()
         ts = self.timestamps

@@ -5,70 +5,68 @@ import time
 
 import pytest
 
-# ── module-level xunit setup/teardown ────────────────────────────────────
-_module_log = []
-_module_log_lock = threading.Lock()
+from tests.markers import parallelizable
+
+
+# -- module-level xunit setup/teardown --
+
+class _ModuleState:
+    log = []
 
 
 def setup_module(module):
-    with _module_log_lock:
-        _module_log.append("setup_module")
+    _ModuleState.log.append("setup_module")
 
 
 def teardown_module(module):
-    with _module_log_lock:
-        _module_log.append("teardown_module")
+    _ModuleState.log.append("teardown_module")
 
 
 def test_module_setup_ran():
-    assert "setup_module" in _module_log
+    assert "setup_module" in _ModuleState.log
 
 
-# ── function-level xunit setup/teardown ──────────────────────────────────
-_func_log = []
-_func_log_lock = threading.Lock()
+# -- function-level xunit setup/teardown --
+
+class _FuncState:
+    log = []
 
 
 def setup_function(function):
-    with _func_log_lock:
-        _func_log.append(f"setup_{function.__name__}")
+    _FuncState.log.append(f"setup_{function.__name__}")
 
 
 def teardown_function(function):
-    with _func_log_lock:
-        _func_log.append(f"teardown_{function.__name__}")
+    _FuncState.log.append(f"teardown_{function.__name__}")
 
 
 def test_func_alpha():
-    assert "setup_test_func_alpha" in _func_log
+    assert "setup_test_func_alpha" in _FuncState.log
 
 
 def test_func_beta():
-    assert "setup_test_func_beta" in _func_log
+    assert "setup_test_func_beta" in _FuncState.log
 
 
 def test_function_level_teardowns_ran():
     """Verify teardowns ran for previous functions."""
-    assert "teardown_test_func_alpha" in _func_log
-    assert "teardown_test_func_beta" in _func_log
+    assert "teardown_test_func_alpha" in _FuncState.log
+    assert "teardown_test_func_beta" in _FuncState.log
 
 
-# ── class with setup_class / teardown_class ──────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- class with setup_class / teardown_class --
+@parallelizable("children")
 class TestXunitClassLevel:
 
     _class_log = []
-    _class_lock = threading.Lock()
 
     @classmethod
     def setup_class(cls):
-        with cls._class_lock:
-            cls._class_log.append("setup_class")
+        cls._class_log.append("setup_class")
 
     @classmethod
     def teardown_class(cls):
-        with cls._class_lock:
-            cls._class_log.append("teardown_class")
+        cls._class_log.append("teardown_class")
 
     def test_class_setup_ran(self):
         assert "setup_class" in self._class_log
@@ -78,20 +76,17 @@ class TestXunitClassLevel:
         assert count == 1, f"setup_class ran {count} times"
 
 
-# ── class with setup_method / teardown_method ────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- class with setup_method / teardown_method --
+@parallelizable("children")
 class TestXunitMethodLevel:
 
     _method_log = []
-    _method_lock = threading.Lock()
 
     def setup_method(self, method):
-        with self._method_lock:
-            self._method_log.append(f"setup_{method.__name__}")
+        self._method_log.append(f"setup_{method.__name__}")
 
     def teardown_method(self, method):
-        with self._method_lock:
-            self._method_log.append(f"teardown_{method.__name__}")
+        self._method_log.append(f"teardown_{method.__name__}")
 
     def test_method_a(self):
         time.sleep(0.1)
@@ -112,30 +107,25 @@ def test_xunit_method_setups_all_ran():
     assert len(setups) >= 3, f"expected >= 3 setups, got {setups}"
 
 
-# ── combined: setup_class + setup_method ─────────────────────────────────
-@pytest.mark.parallelizable("children")
+# -- combined: setup_class + setup_method --
+@parallelizable("children")
 class TestXunitCombined:
 
     _combined_log = []
-    _combined_lock = threading.Lock()
 
     @classmethod
     def setup_class(cls):
-        with cls._combined_lock:
-            cls._combined_log.append("class_setup")
+        cls._combined_log.append("class_setup")
 
     @classmethod
     def teardown_class(cls):
-        with cls._combined_lock:
-            cls._combined_log.append("class_teardown")
+        cls._combined_log.append("class_teardown")
 
     def setup_method(self, method):
-        with self._combined_lock:
-            self._combined_log.append(f"method_setup_{method.__name__}")
+        self._combined_log.append(f"method_setup_{method.__name__}")
 
     def teardown_method(self, method):
-        with self._combined_lock:
-            self._combined_log.append(f"method_teardown_{method.__name__}")
+        self._combined_log.append(f"method_teardown_{method.__name__}")
 
     def test_x(self):
         time.sleep(0.1)
