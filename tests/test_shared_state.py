@@ -5,6 +5,7 @@ import threading
 import pytest
 
 
+@pytest.mark.parallelizable("children")
 class TestThreadSafeDict:
     """Mutate a shared dict from multiple threads and verify consistency."""
 
@@ -36,6 +37,7 @@ def test_thread_safe_dict_verify():
             assert d[key] == base + i
 
 
+@pytest.mark.parallelizable("children")
 class TestLockFreeCounter:
     """Concurrent local increments — each thread has its own counter."""
 
@@ -68,6 +70,7 @@ def test_lock_free_counter_verify():
 
 
 @pytest.mark.parallel_only
+@pytest.mark.parallelizable("children")
 class TestBarrierSync:
     """Use a barrier to prove tests truly run concurrently."""
 

@@ -32,6 +32,7 @@ def module_resource():
 
 
 # ── class-scoped yield fixture ───────────────────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestClassScopedYieldFixture:
     """Class-scoped yield fixture: setup once, teardown after all methods."""
 
@@ -60,6 +61,7 @@ class TestClassScopedYieldFixture:
 
 
 @pytest.mark.parallel_only
+@pytest.mark.parallelizable("children")
 class TestClassScopedYieldFixtureVerify:
     """Verify class-scoped fixture is set up exactly once (parallel only)."""
 
@@ -85,6 +87,7 @@ class TestClassScopedYieldFixtureVerify:
 
 
 # ── autouse fixture at class scope with state ────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestAutouseClassFixtureState:
     """Autouse class fixture that provides shared state to all methods."""
 
@@ -110,6 +113,7 @@ class TestAutouseClassFixtureState:
 
 
 # ── parameterized fixture ────────────────────────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestParameterizedFixture:
     """Parameterized class-scoped fixture expands into multiple test runs."""
 
@@ -125,6 +129,7 @@ class TestParameterizedFixture:
 
 
 # ── multiple fixtures composed ───────────────────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestMultipleFixtures:
     """Combine session, module, and class fixtures in one test class."""
 
@@ -144,6 +149,7 @@ class TestMultipleFixtures:
 
 
 # ── yield fixture with cleanup verification ──────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestYieldFixtureCleanup:
     """Verify that yield fixture teardown actually runs."""
 
@@ -163,6 +169,7 @@ class TestYieldFixtureCleanup:
 
 
 # ── function-scoped fixture (per-test) ───────────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestFunctionScopedFixture:
     """Function-scoped fixtures get fresh values per test."""
 

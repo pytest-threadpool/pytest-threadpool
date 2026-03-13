@@ -54,6 +54,7 @@ def test_function_level_teardowns_ran():
 
 
 # ── class with setup_class / teardown_class ──────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestXunitClassLevel:
 
     _class_log = []
@@ -78,6 +79,7 @@ class TestXunitClassLevel:
 
 
 # ── class with setup_method / teardown_method ────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestXunitMethodLevel:
 
     _method_log = []
@@ -111,6 +113,7 @@ def test_xunit_method_setups_all_ran():
 
 
 # ── combined: setup_class + setup_method ─────────────────────────────────
+@pytest.mark.parallelizable("children")
 class TestXunitCombined:
 
     _combined_log = []

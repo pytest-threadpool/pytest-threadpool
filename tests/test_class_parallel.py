@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-
 @pytest.mark.parallel_only
+@pytest.mark.parallelizable("children")
 class TestParallelExecution:
     """Verify that test methods within a class actually run concurrently."""
 
