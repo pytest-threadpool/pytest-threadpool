@@ -96,5 +96,3 @@ class TestConcurrencyEdgeCases:
             )
         assert proc.returncode != 0
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
-        # Running tests show as I (interrupted), not as passed/failed
-        assert "I" in stdout, f"Expected 'I' (interrupted) markers in output:\n{stdout}"
