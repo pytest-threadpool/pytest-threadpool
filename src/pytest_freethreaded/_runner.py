@@ -429,18 +429,23 @@ class ParallelRunner:
 
             report = call_rep if call_rep else setup_reports[item]
 
-            # Suppress terminal reporter output, fire hooks for stats only
+            # Suppress terminal reporter output, fire hooks for stats only.
+            # try/finally ensures restore() runs even on KeyboardInterrupt,
+            # otherwise the terminal writer stays suppressed and pytest's
+            # interrupt traceback is silently lost.
             live.suppress()
-            ihook.pytest_runtest_logstart(
-                nodeid=item.nodeid, location=item.location
-            )
-            ihook.pytest_runtest_logreport(report=setup_reports[item])
-            if setup_passed[item]:
-                if session.config.getoption("setupshow", False):
-                    show_test_item(item)
-                if call_rep is not None:
-                    ihook.pytest_runtest_logreport(report=call_rep)
-            live.restore()
+            try:
+                ihook.pytest_runtest_logstart(
+                    nodeid=item.nodeid, location=item.location
+                )
+                ihook.pytest_runtest_logreport(report=setup_reports[item])
+                if setup_passed[item]:
+                    if session.config.getoption("setupshow", False):
+                        show_test_item(item)
+                    if call_rep is not None:
+                        ihook.pytest_runtest_logreport(report=call_rep)
+            finally:
+                live.restore()
             live.mark_done(item, report)
 
             reported.add(item)
