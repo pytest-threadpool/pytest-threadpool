@@ -449,8 +449,18 @@ class ParallelRunner:
             fins = per_item_fixture_fins.get(item, [])
 
             def _run_fins(fns=fins):
+                exceptions = []
                 for fn in reversed(fns):
-                    fn()
+                    try:
+                        fn()
+                    except BaseException as e:
+                        exceptions.append(e)
+                if len(exceptions) == 1:
+                    raise exceptions[0]
+                elif exceptions:
+                    raise BaseExceptionGroup(
+                        "errors during fixture teardown", exceptions
+                    )
 
             teardown_info = CallInfo.from_call(_run_fins, when="teardown")
             rep = item.ihook.pytest_runtest_makereport(item=item, call=teardown_info)

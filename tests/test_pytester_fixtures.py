@@ -41,3 +41,13 @@ class TestFixturesUnderParallel:
         ftdir.copy_case("fixture_yield_cleanup")
         result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
+
+    def test_fixture_teardown_exception_runs_all_finalizers(self, ftdir):
+        """A failing finalizer must not prevent remaining finalizers from running."""
+        ftdir.copy_case("fixture_teardown_exception")
+        result = ftdir.run_pytest("--freethreaded", "2")
+        # 3 passed (including verify), 1 teardown error from resource_a
+        assert "3 passed" in result.stdout
+        assert "1 error" in result.stdout
+        # The verify test proves all finalizers ran despite the exception
+        assert "FAILED" not in result.stdout
