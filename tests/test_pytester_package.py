@@ -1,7 +1,5 @@
 """Tests for package-level marker inheritance and overrides."""
 
-import pytest
-
 from tests.cases._templates import sequential_order_class
 
 
@@ -12,14 +10,10 @@ class TestPackageLevelParallel:
         """Package-level children batches tests from multiple modules together."""
         pkg = ftdir.mkdir("mypkg")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("_state.py").write_text(
-            "import threading\n"
-            "\n"
-            "class PkgState:\n"
-            "    barrier = threading.Barrier(4, timeout=10)\n"
+            "import threading\n\nclass PkgState:\n    barrier = threading.Barrier(4, timeout=10)\n"
         )
         pkg.joinpath("test_a.py").write_text(
             "from mypkg._state import PkgState\n"
@@ -47,17 +41,13 @@ class TestPackageLevelParallel:
         """Subpackage without own marker inherits parent's children scope."""
         pkg = ftdir.mkdir("parent")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         sub = pkg.joinpath("sub")
         sub.mkdir()
         sub.joinpath("__init__.py").write_text("")
         sub.joinpath("_state.py").write_text(
-            "import threading\n"
-            "\n"
-            "class SubState:\n"
-            "    barrier = threading.Barrier(3, timeout=10)\n"
+            "import threading\n\nclass SubState:\n    barrier = threading.Barrier(3, timeout=10)\n"
         )
         sub.joinpath("test_a.py").write_text(
             "from parent.sub._state import SubState\n"
@@ -83,8 +73,7 @@ class TestPackageLevelParallel:
         the parametrized class joined it."""
         pkg = ftdir.mkdir("scopepkg")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("test_mixed.py").write_text(
             "import threading\n"
@@ -117,8 +106,7 @@ class TestPackageLevelParallel:
         """@not_parallelizable class in a parallel package runs sequentially."""
         pkg = ftdir.mkdir("notpkg")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("test_seq.py").write_text(
             "import pytest\n"
@@ -135,15 +123,13 @@ class TestPackageLevelParallel:
         """Module pytestmark overrides package marker."""
         pkg = ftdir.mkdir("modpkg")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("test_override.py").write_text(
             "import pytest\n"
             "\n"
             'pytestmark = pytest.mark.parallelizable("parameters")\n'
-            "\n"
-            + sequential_order_class("TestModOverride")
+            "\n" + sequential_order_class("TestModOverride")
         )
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
@@ -152,18 +138,14 @@ class TestPackageLevelParallel:
         """Subpackage with own parameters overrides parent children."""
         pkg = ftdir.mkdir("outer")
         pkg.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         sub = pkg.joinpath("inner")
         sub.mkdir()
         sub.joinpath("__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("parameters")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("parameters")\n'
         )
-        sub.joinpath("test_sub.py").write_text(
-            sequential_order_class("TestSubOverride")
-        )
+        sub.joinpath("test_sub.py").write_text(sequential_order_class("TestSubOverride"))
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 

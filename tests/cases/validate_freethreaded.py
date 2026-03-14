@@ -1,4 +1,5 @@
 """Simple test file used to trigger --freethreaded on a faked GIL build."""
+
 import pytest
 
 

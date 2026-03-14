@@ -1,4 +1,5 @@
 """3-party barrier — succeeds only if methods run concurrently."""
+
 import threading
 
 import pytest

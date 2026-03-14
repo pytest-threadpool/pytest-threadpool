@@ -1,7 +1,8 @@
 """Tests that spawn their own threads during parallel execution."""
-import threading
-import pytest
 
+import threading
+
+import pytest
 
 results = {}
 lock = threading.Lock()

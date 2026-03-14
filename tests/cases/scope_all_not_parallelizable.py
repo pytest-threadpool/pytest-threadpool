@@ -1,7 +1,8 @@
 """All items marked not_parallelizable — verify sequential execution."""
-import threading
-import pytest
 
+import threading
+
+import pytest
 
 execution_threads = []
 lock = threading.Lock()

@@ -1,4 +1,5 @@
 """Mixed setup pass/fail within a single parallel group."""
+
 import pytest
 
 

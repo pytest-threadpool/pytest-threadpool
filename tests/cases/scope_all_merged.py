@@ -1,4 +1,5 @@
 """'all' merges plain methods and parametrized variants into one batch."""
+
 import threading
 
 import pytest

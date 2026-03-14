@@ -3,17 +3,17 @@
 ## Development setup
 
 ```bash
-# Clone and install in editable mode
 git clone <repo-url>
 cd pytest-freethreaded
-pip install -e .
-
-# Run tests (3.14t has GIL off by default, no PYTHON_GIL=0 needed)
-pytest --freethreaded auto
+./scripts/setup-dev        # defaults to python 3.14t
+./scripts/setup-dev 3.13t  # or specify a version
 ```
 
-> **Note:** `PYTHON_GIL=0` is only required on Python 3.13t.
-> Python 3.14t ships with the GIL disabled by default.
+This installs a free-threaded Python via uv, syncs all dependencies (including
+dev tools), and sets up a pre-commit hook that runs `ruff format`, `ruff check`,
+and `pyright` before each commit.
+
+> Python 3.13t and 3.14t ship with the GIL disabled by default.
 
 ## Architecture rules
 
@@ -102,13 +102,20 @@ in hook functions — keep them thin.
 
 ```
 src/pytest_freethreaded/
-    __init__.py       # Public API: parallelizable, not_parallelizable
+    __init__.py       # Re-exports only
+    _api.py           # Public API: parallelizable, not_parallelizable
     _constants.py     # ParallelScope and _GroupPrefix enums
     _markers.py       # MarkerResolver: marker introspection
     _grouping.py      # GroupKeyBuilder: parallel batch grouping
     _fixtures.py      # FixtureManager: finalizer save/restore
     _runner.py        # ParallelRunner: parallel execution orchestration
     plugin.py         # pytest hook implementations (wiring only)
+
+hooks/
+    pre-commit        # Git pre-commit hook (ruff + pyright)
+
+scripts/
+    setup-dev         # One-command dev environment setup
 ```
 
 ## Running tests

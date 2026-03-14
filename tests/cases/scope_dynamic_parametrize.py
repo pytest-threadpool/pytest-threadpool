@@ -1,7 +1,8 @@
 """Dynamic parametrize via pytest_generate_tests with parallel markers."""
-import threading
-import pytest
 
+import threading
+
+import pytest
 
 pytestmark = pytest.mark.parallelizable("parameters")
 

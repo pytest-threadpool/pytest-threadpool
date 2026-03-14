@@ -1,4 +1,5 @@
 """parallel_only marker skips tests when --freethreaded is not passed."""
+
 import pytest
 
 

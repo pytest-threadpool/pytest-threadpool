@@ -3,6 +3,7 @@
 Verifies that custom markers work for filtering with -m expressions
 inside a parallelizable class.
 """
+
 import pytest
 
 

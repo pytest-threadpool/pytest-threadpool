@@ -1,5 +1,7 @@
 """Non-pickleable thread-safe objects shared across different parallel groups."""
+
 import threading
+from typing import ClassVar
 
 import pytest
 
@@ -7,7 +9,7 @@ import pytest
 class SharedState:
     lock = threading.Lock()
     event = threading.Event()
-    results = {}
+    results: ClassVar[dict] = {}
 
 
 @pytest.mark.parallelizable("children")

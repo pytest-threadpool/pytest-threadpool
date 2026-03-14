@@ -1,10 +1,12 @@
 """Bare module functions run sequentially on one thread."""
+
 import threading
 from time import sleep
+from typing import ClassVar
 
 
 class _State:
-    execution_log = []
+    execution_log: ClassVar[list] = []
 
 
 def test_a():

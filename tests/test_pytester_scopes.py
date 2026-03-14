@@ -1,7 +1,5 @@
 """Tests for parallel scope types and marker priority."""
 
-import pytest
-
 
 class TestParallelScopes:
     """Verify parameters, all, children scopes and override priority."""
@@ -41,7 +39,7 @@ class TestParallelScopes:
         ftdir.copy_case("scope_not_parallelizable_function")
         result = ftdir.run_pytest("--freethreaded", "auto", "-s")
         result.assert_outcomes(passed=2)
-        order = [l.split("ORDER:")[1] for l in result.outlines if "ORDER:" in l]
+        order = [line.split("ORDER:")[1] for line in result.outlines if "ORDER:" in line]
         assert order == ["a", "b"]
 
     def test_module_level_children(self, ftdir):

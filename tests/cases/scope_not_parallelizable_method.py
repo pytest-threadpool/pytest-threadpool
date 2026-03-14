@@ -1,12 +1,14 @@
 """@not_parallelizable on a method opts it out of class children batch."""
+
 import time
+from typing import ClassVar
 
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestMixed:
-    log = []
+    log: ClassVar[list] = []
 
     def test_parallel_a(self):
         time.sleep(0.05)

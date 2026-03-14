@@ -1,7 +1,5 @@
 """Tests for thread-safe shared state under parallel execution."""
 
-import pytest
-
 
 class TestSharedStateUnderParallel:
     """Verify thread-safe dict/counter operations with parallel children."""

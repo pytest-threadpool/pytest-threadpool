@@ -1,4 +1,5 @@
 """Method's own 'parameters' overrides class 'children'."""
+
 import threading
 
 import pytest

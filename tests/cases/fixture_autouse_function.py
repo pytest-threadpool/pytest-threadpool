@@ -1,7 +1,8 @@
 """Autouse function-scoped fixtures work correctly in parallel groups."""
-import threading
-import pytest
 
+import threading
+
+import pytest
 
 setup_log = []
 teardown_log = []

@@ -1,8 +1,10 @@
 """Module-level setup_module / teardown_module."""
 
+from typing import ClassVar
+
 
 class _State:
-    log = []
+    log: ClassVar[list] = []
 
 
 def setup_module(module):

@@ -1,10 +1,13 @@
 """setup_class runs once before parallel methods."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestClassSetup:
-    log = []
+    log: ClassVar[list] = []
 
     @classmethod
     def setup_class(cls):

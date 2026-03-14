@@ -1,10 +1,13 @@
 """Concurrent dict writes from parallel methods are consistent."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestDict:
-    shared = {}
+    shared: ClassVar[dict] = {}
 
     def _write(self, key, base, n=1000):
         for i in range(n):

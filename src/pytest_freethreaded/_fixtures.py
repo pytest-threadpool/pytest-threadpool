@@ -73,7 +73,7 @@ class FixtureManager:
         # mirrors pytest's own runner.py (SetupState).
         for node in list(session._setupstate.stack):  # pyright: ignore[reportPrivateUsage]
             if node not in needed:
-                fins_list, exc_info = session._setupstate.stack[node]  # pyright: ignore[reportPrivateUsage]
+                fins_list, _exc_info = session._setupstate.stack[node]  # pyright: ignore[reportPrivateUsage]
                 saved.append((node, list(fins_list)))
                 fins_list.clear()
         return saved

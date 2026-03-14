@@ -1,4 +1,5 @@
 """Test body raises SystemExit during parallel execution."""
+
 import pytest
 
 

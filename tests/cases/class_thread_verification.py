@@ -1,4 +1,5 @@
 """Barrier sync + thread name capture to prove multi-threading."""
+
 import threading
 
 import pytest

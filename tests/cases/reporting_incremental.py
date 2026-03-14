@@ -3,7 +3,9 @@
 A conftest plugin writes report timestamps to a file. The fast tests
 should be reported well before the slow test finishes.
 """
+
 import time
+
 import pytest
 
 

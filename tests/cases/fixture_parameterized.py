@@ -1,4 +1,5 @@
 """Parameterized class-scoped fixture expands correctly."""
+
 import pytest
 
 

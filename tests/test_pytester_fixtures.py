@@ -1,7 +1,5 @@
 """Tests for fixture correctness under parallel execution."""
 
-import pytest
-
 
 class TestFixturesUnderParallel:
     """Verify fixture setup/teardown behaves correctly with parallel children."""

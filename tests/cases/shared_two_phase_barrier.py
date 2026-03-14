@@ -1,5 +1,7 @@
 """Two-phase barrier proves tests truly run concurrently."""
+
 import threading
+from typing import ClassVar
 
 import pytest
 
@@ -8,7 +10,7 @@ import pytest
 class TestBarrier:
     barrier = threading.Barrier(3, timeout=10)
     verify_barrier = threading.Barrier(3, timeout=10)
-    arrived = {}
+    arrived: ClassVar[dict] = {}
 
     def _arrive(self, name):
         self.barrier.wait()

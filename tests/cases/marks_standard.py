@@ -3,6 +3,7 @@
 Verifies skip, skipif, xfail, and parametrize work correctly
 inside a parallelizable class.
 """
+
 import pytest
 
 
@@ -18,7 +19,7 @@ class TestStandardMarks:
 
     @pytest.mark.xfail(reason="expected failure")
     def test_xfail(self):
-        assert False
+        raise AssertionError("expected failure")
 
     @pytest.mark.parametrize("x", [1, 2, 3])
     def test_param(self, x):

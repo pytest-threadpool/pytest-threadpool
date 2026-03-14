@@ -1,10 +1,13 @@
 """Each thread counts independently, results are correct."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestCounter:
-    results = {}
+    results: ClassVar[dict] = {}
 
     def _count(self, name, n=50_000):
         total = 0

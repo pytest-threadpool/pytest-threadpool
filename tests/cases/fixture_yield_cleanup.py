@@ -1,10 +1,13 @@
 """Yield fixture teardown runs after all parallel methods."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestCleanup:
-    flag = {"cleaned": False}
+    flag: ClassVar[dict] = {"cleaned": False}
 
     @pytest.fixture(autouse=True, scope="class")
     def resource(self):

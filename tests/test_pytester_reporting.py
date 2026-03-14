@@ -3,34 +3,16 @@
 import json
 import re
 import shutil
-
-import pytest
-
 from pathlib import Path
 
-from tests.cases.reporting_cross_module import INIT_SRC, MOD_A_SRC, MOD_B_SRC
 from tests.cases import reporting_package_children as pkg_children
+from tests.cases.reporting_cross_module import INIT_SRC, MOD_A_SRC, MOD_B_SRC
 
 CASES_DIR = Path(__file__).parent / "cases"
 
-MULTI_FILE_INIT = (
-    "import pytest\n"
-    'pytestmark = pytest.mark.parallelizable("children")\n'
-)
-MULTI_FILE_A = (
-    "def test_a1():\n"
-    "    pass\n"
-    "\n"
-    "def test_a2():\n"
-    "    pass\n"
-)
-MULTI_FILE_B = (
-    "def test_b1():\n"
-    "    pass\n"
-    "\n"
-    "def test_b2():\n"
-    "    pass\n"
-)
+MULTI_FILE_INIT = 'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
+MULTI_FILE_A = "def test_a1():\n    pass\n\ndef test_a2():\n    pass\n"
+MULTI_FILE_B = "def test_b1():\n    pass\n\ndef test_b2():\n    pass\n"
 
 
 class TestReporting:
@@ -56,9 +38,7 @@ class TestReporting:
         result.assert_outcomes(passed=4)
 
         log_path = ftdir.path / "report_log.json"
-        assert log_path.exists(), (
-            f"report_log.json not created\nstdout:\n{result.stdout}"
-        )
+        assert log_path.exists(), f"report_log.json not created\nstdout:\n{result.stdout}"
         entries = json.loads(log_path.read_text())
         assert len(entries) == 4
 
@@ -101,9 +81,7 @@ class TestReporting:
         result.assert_outcomes(passed=4)
 
         log_path = ftdir.path / "report_log.json"
-        assert log_path.exists(), (
-            f"report_log.json not created\nstdout:\n{result.stdout}"
-        )
+        assert log_path.exists(), f"report_log.json not created\nstdout:\n{result.stdout}"
         entries = json.loads(log_path.read_text())
         assert len(entries) == 4
 
@@ -179,10 +157,7 @@ class TestReporting:
         result = ftdir.run_pytest("--freethreaded", "4")
         result.assert_outcomes(passed=4)
 
-        dot_lines = [
-            l for l in result.outlines
-            if re.search(r"test_case\.py\s+\.", l)
-        ]
+        dot_lines = [line for line in result.outlines if re.search(r"test_case\.py\s+\.", line)]
         assert len(dot_lines) == 1, (
             f"Expected test_case.py on exactly 1 line, got {len(dot_lines)}: "
             f"{dot_lines}\nstdout:\n{result.stdout}"
@@ -237,14 +212,12 @@ def _render_terminal(raw):
             # (we always \r\033[K before writing, so line is cleared)
             lines[row] = lines[row] + tok
 
-    return [l for l in lines if l.strip()]
+    return [line for line in lines if line.strip()]
 
 
 def _strip_ansi(text):
     """Remove ANSI escape sequences from text."""
-    text = re.sub(r"\033\[[^a-zA-Z]*[a-zA-Z]", "", text)
-    text = re.sub(r"\033\][^\x07]*\x07", "", text)
-    return text
+    return re.sub(r"\033\][^\x07]*\x07", "", re.sub(r"\033\[[^a-zA-Z]*[a-zA-Z]", "", text))
 
 
 # Regex matching a result line: "path/to/test.py .." with result letters
@@ -260,14 +233,8 @@ class TestDumbMode:
         result = ftdir.run_pytest("--freethreaded", "4")
         result.assert_outcomes(passed=4)
 
-        a_lines = [
-            l for l in result.outlines
-            if re.search(r"test_a\.py\s+[.Fs]+", l)
-        ]
-        b_lines = [
-            l for l in result.outlines
-            if re.search(r"test_b\.py\s+[.Fs]+", l)
-        ]
+        a_lines = [line for line in result.outlines if re.search(r"test_a\.py\s+[.Fs]+", line)]
+        b_lines = [line for line in result.outlines if re.search(r"test_b\.py\s+[.Fs]+", line)]
         assert len(a_lines) == 1, (
             f"Expected test_a.py on 1 result line, got {len(a_lines)}: "
             f"{a_lines}\nstdout:\n{result.stdout}"
@@ -283,13 +250,8 @@ class TestDumbMode:
         result = ftdir.run_pytest("--freethreaded", "4")
         result.assert_outcomes(passed=4)
 
-        ansi_lines = [
-            l for l in result.outlines if re.search(r"\033[\[\]]", l)
-        ]
-        assert not ansi_lines, (
-            f"ANSI escapes found in dumb mode output:\n"
-            + "\n".join(ansi_lines)
-        )
+        ansi_lines = [line for line in result.outlines if re.search(r"\033[\[\]]", line)]
+        assert not ansi_lines, "ANSI escapes found in dumb mode output:\n" + "\n".join(ansi_lines)
 
     def test_progress_on_file_lines(self, ftdir):
         """Each file line includes a progress percentage."""
@@ -297,17 +259,13 @@ class TestDumbMode:
         result = ftdir.run_pytest("--freethreaded", "4")
         result.assert_outcomes(passed=4)
 
-        file_lines = [
-            l for l in result.outlines if _RESULT_LINE_RE.search(l)
-        ]
+        file_lines = [line for line in result.outlines if _RESULT_LINE_RE.search(line)]
         assert len(file_lines) == 2, (
             f"Expected 2 result lines, got {len(file_lines)}: "
             f"{file_lines}\nstdout:\n{result.stdout}"
         )
         for line in file_lines:
-            assert re.search(r"\[\s*\d+%\]", line), (
-                f"Missing progress on file line: {line!r}"
-            )
+            assert re.search(r"\[\s*\d+%\]", line), f"Missing progress on file line: {line!r}"
 
 
 class TestLiveMode:
@@ -321,8 +279,7 @@ class TestLiveMode:
 
         # Cursor-up escape: ESC[nA
         assert re.search(r"\033\[\d+A", result.stdout), (
-            f"No cursor-up ANSI sequences in live mode output.\n"
-            f"stdout:\n{result.stdout!r}"
+            f"No cursor-up ANSI sequences in live mode output.\nstdout:\n{result.stdout!r}"
         )
 
     def test_progress_line_at_end(self, ftdir):
@@ -332,12 +289,9 @@ class TestLiveMode:
         result.assert_outcomes(passed=4)
 
         screen = _render_terminal(result.stdout)
-        progress_lines = [
-            l for l in screen if re.search(r"4/4\s*\[\s*100%\]", l)
-        ]
-        assert progress_lines, (
-            f"No '4/4 [100%]' progress line found.\n"
-            f"screen:\n" + "\n".join(screen)
+        progress_lines = [line for line in screen if re.search(r"4/4\s*\[\s*100%\]", line)]
+        assert progress_lines, "No '4/4 [100%]' progress line found.\nscreen:\n" + "\n".join(
+            screen
         )
 
     def test_file_lines_no_per_line_progress(self, ftdir):

@@ -1,4 +1,5 @@
 """Session + module + class fixtures compose correctly."""
+
 import pytest
 
 
@@ -21,4 +22,5 @@ class TestCompose:
         assert module_res["from"] == "module"
 
     def test_both(self, session_res, module_res):
-        assert session_res and module_res
+        assert session_res
+        assert module_res

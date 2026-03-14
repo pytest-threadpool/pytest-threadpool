@@ -1,4 +1,5 @@
 """Single-method class — falls back to sequential without error."""
+
 import pytest
 
 

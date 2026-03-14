@@ -1,12 +1,7 @@
 """Tests for standard and custom pytest marker compatibility under parallel execution."""
 
-import pytest
-
 CUSTOM_MARKER_INI = (
-    "[pytest]\n"
-    "markers =\n"
-    "    smoke: smoke tests\n"
-    "    regression: regression tests\n"
+    "[pytest]\nmarkers =\n    smoke: smoke tests\n    regression: regression tests\n"
 )
 
 
@@ -49,7 +44,10 @@ class TestCustomMarks:
         """'-m \"smoke and regression\"' selects only doubly-marked test."""
         self._setup_custom(ftdir)
         result = ftdir.run_pytest(
-            "--freethreaded", "auto", "-m", "smoke and regression",
+            "--freethreaded",
+            "auto",
+            "-m",
+            "smoke and regression",
         )
         result.assert_outcomes(passed=1)
 
@@ -57,7 +55,10 @@ class TestCustomMarks:
         """'-m \"smoke or regression\"' selects all marked tests."""
         self._setup_custom(ftdir)
         result = ftdir.run_pytest(
-            "--freethreaded", "auto", "-m", "smoke or regression",
+            "--freethreaded",
+            "auto",
+            "-m",
+            "smoke or regression",
         )
         result.assert_outcomes(passed=3)
 
@@ -65,6 +66,9 @@ class TestCustomMarks:
         """'-m \"not smoke\"' excludes smoke tests."""
         self._setup_custom(ftdir)
         result = ftdir.run_pytest(
-            "--freethreaded", "auto", "-m", "not smoke",
+            "--freethreaded",
+            "auto",
+            "-m",
+            "not smoke",
         )
         result.assert_outcomes(passed=2)

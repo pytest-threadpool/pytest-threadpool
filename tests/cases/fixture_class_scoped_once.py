@@ -1,18 +1,20 @@
 """Class-scoped fixture runs exactly once despite parallel methods."""
+
 import threading
+from typing import ClassVar
 
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestOnce:
-    setup_count = []
+    setup_count: ClassVar[list] = []
     barrier = threading.Barrier(3, timeout=10)
 
     @pytest.fixture(autouse=True, scope="class")
     def db(self):
         self.setup_count.append(1)
-        yield
+        return
 
     def test_a(self):
         self.barrier.wait()

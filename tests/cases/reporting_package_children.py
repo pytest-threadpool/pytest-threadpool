@@ -5,10 +5,7 @@ across multiple modules. All should be treated as children of the
 package and run in one parallel batch.
 """
 
-INIT_SRC = (
-    "import pytest\n"
-    'pytestmark = pytest.mark.parallelizable("children")\n'
-)
+INIT_SRC = 'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
 
 # Module A: one class with a fast method and a slow method
 MOD_A_SRC = (

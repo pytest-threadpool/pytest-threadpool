@@ -1,4 +1,5 @@
 """@not_parallelizable on bare functions in a parallel module."""
+
 import time
 
 import pytest

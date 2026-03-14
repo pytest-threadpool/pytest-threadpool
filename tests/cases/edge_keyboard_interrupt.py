@@ -1,4 +1,5 @@
 """Test body raises KeyboardInterrupt during parallel execution."""
+
 import pytest
 
 
@@ -8,7 +9,7 @@ class TestKeyboardInterrupt:
         assert True
 
     def test_interrupts(self):
-        raise KeyboardInterrupt()
+        raise KeyboardInterrupt
 
     def test_also_normal(self):
         assert True

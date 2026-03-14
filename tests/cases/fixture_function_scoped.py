@@ -1,16 +1,19 @@
 """Function-scoped fixtures get fresh values per test."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestFuncScope:
-    call_log = []
+    call_log: ClassVar[list] = []
 
     @pytest.fixture(autouse=True)
     def counter(self):
         idx = len(self.call_log)
         self.call_log.append(f"setup_{idx}")
-        yield idx
+        return idx
 
     def test_a(self, counter):
         assert isinstance(counter, int)

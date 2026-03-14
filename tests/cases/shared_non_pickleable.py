@@ -1,6 +1,8 @@
 """Non-pickleable thread-safe objects shared across parallel children."""
+
 import logging
 import threading
+from typing import ClassVar
 
 import pytest
 
@@ -11,7 +13,7 @@ class TestNonPickleable:
     condition = threading.Condition()
     semaphore = threading.Semaphore(3)
     logger = logging.getLogger("test_non_pickleable")
-    results = {}
+    results: ClassVar[dict] = {}
 
     def test_lock(self):
         with self.lock:

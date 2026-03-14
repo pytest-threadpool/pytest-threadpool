@@ -1,8 +1,10 @@
 """Function-level setup_function / teardown_function."""
 
+from typing import ClassVar
+
 
 class _State:
-    log = []
+    log: ClassVar[list] = []
 
 
 def setup_function(function):

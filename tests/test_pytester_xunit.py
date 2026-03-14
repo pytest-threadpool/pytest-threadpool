@@ -1,7 +1,5 @@
 """Tests for xunit-style setup/teardown under parallel execution."""
 
-import pytest
-
 
 class TestXunitUnderParallel:
     """Verify xunit setup/teardown hooks work correctly with parallel children."""

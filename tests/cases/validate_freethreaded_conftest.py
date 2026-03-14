@@ -1,4 +1,5 @@
 """conftest that fakes a GIL-enabled Python build for testing the validation."""
+
 import sysconfig
 
 _original = sysconfig.get_config_vars

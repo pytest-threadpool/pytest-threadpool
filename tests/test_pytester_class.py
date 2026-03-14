@@ -1,7 +1,5 @@
 """Tests for class-level parallel execution."""
 
-import pytest
-
 
 class TestClassParallel:
     """Verify @parallelizable('children') on classes via isolated subprocess runs."""
@@ -17,7 +15,7 @@ class TestClassParallel:
         ftdir.copy_case("class_thread_verification")
         result = ftdir.run_pytest("--freethreaded", "3", "-s")
         result.assert_outcomes(passed=3)
-        threads = {l.split("THREAD:")[1] for l in result.outlines if "THREAD:" in l}
+        threads = {line.split("THREAD:")[1] for line in result.outlines if "THREAD:" in line}
         assert len(threads) >= 2, f"expected multiple threads, got {threads}"
 
     def test_single_method_class(self, ftdir):

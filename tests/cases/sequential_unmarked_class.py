@@ -1,9 +1,11 @@
 """No marker — class tests run sequentially even with --freethreaded."""
+
 import time
+from typing import ClassVar
 
 
 class TestUnmarked:
-    order = []
+    order: ClassVar[list] = []
 
     def test_first(self):
         time.sleep(0.05)

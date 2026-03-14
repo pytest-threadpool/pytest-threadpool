@@ -1,11 +1,11 @@
 """Group key computation for parallel test batching."""
 
-from ._constants import (
-    ParallelScope,
+from pytest_freethreaded._constants import (
     SCOPE_NOT,
+    ParallelScope,
     _GroupPrefix,
 )
-from ._markers import MarkerResolver
+from pytest_freethreaded._markers import MarkerResolver
 
 
 class GroupKeyBuilder:
@@ -66,8 +66,7 @@ class GroupKeyBuilder:
                 if fp_key:
                     return (_GroupPrefix.CLASS, item.cls, fp_key)
                 return (_GroupPrefix.CLASS, item.cls)
-            else:
-                return (_GroupPrefix.MOD_CHILDREN, id(item.module))
+            return (_GroupPrefix.MOD_CHILDREN, id(item.module))
 
         if param_parallel:
             callspec = getattr(item, "callspec", None)

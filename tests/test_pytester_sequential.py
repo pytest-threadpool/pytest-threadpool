@@ -1,7 +1,5 @@
 """Tests for sequential behavior when no parallel markers are used."""
 
-import pytest
-
 
 class TestSequentialExecution:
     """Verify unmarked tests run sequentially even with --freethreaded."""

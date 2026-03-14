@@ -1,4 +1,5 @@
 """Module-level pytestmark parallelizable('children') with barrier."""
+
 import threading
 
 import pytest

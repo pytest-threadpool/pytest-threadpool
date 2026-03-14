@@ -1,17 +1,16 @@
 """pytest plugin hooks -- wiring only, delegates to classes."""
 
 import os
-import sys
 
 import pytest
 
-from ._constants import (
+from pytest_freethreaded._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLEL_ONLY,
     MARKER_PARALLELIZABLE,
 )
-from ._markers import MarkerResolver
-from ._runner import ParallelRunner
+from pytest_freethreaded._markers import MarkerResolver
+from pytest_freethreaded._runner import ParallelRunner
 
 
 def pytest_addoption(parser):
@@ -19,10 +18,7 @@ def pytest_addoption(parser):
         "--freethreaded",
         default=None,
         metavar="N",
-        help=(
-            "Parallelize marked test calls using N threads. "
-            "'auto' uses os.cpu_count()."
-        ),
+        help=("Parallelize marked test calls using N threads. 'auto' uses os.cpu_count()."),
     )
 
 
@@ -47,10 +43,7 @@ def pytest_collection_modifyitems(config, items):
         return
     skip = pytest.mark.skip(reason="requires --freethreaded")
     for item in items:
-        if (
-            MARKER_PARALLEL_ONLY in item.keywords
-            or MarkerResolver.has_package_parallel_only(item)
-        ):
+        if MARKER_PARALLEL_ONLY in item.keywords or MarkerResolver.has_package_parallel_only(item):
             item.add_marker(skip)
 
 

@@ -5,10 +5,7 @@ tests from different modules into one parallel batch, all tests complete
 and none hang due to cross-module setup/teardown interactions.
 """
 
-INIT_SRC = (
-    "import pytest\n"
-    'pytestmark = pytest.mark.parallelizable("children")\n'
-)
+INIT_SRC = 'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
 
 # Module A: class with function-scoped fixture (mimics ftdir pattern)
 MOD_A_SRC = (

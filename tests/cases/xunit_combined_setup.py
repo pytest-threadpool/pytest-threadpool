@@ -1,10 +1,13 @@
 """Both setup_class and setup_method work together."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestCombined:
-    log = []
+    log: ClassVar[list] = []
 
     @classmethod
     def setup_class(cls):
@@ -22,6 +25,5 @@ class TestCombined:
 
 def test_verify():
     assert TestCombined.log[0] == "class_setup"
-    method_setups = [x for x in TestCombined.log
-                     if x.startswith("method_setup_")]
+    method_setups = [x for x in TestCombined.log if x.startswith("method_setup_")]
     assert len(method_setups) >= 2

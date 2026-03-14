@@ -1,9 +1,9 @@
 """Slow parallel tests for SIGINT handling verification."""
+
 import time
 from pathlib import Path
 
 import pytest
-
 
 teardown_ran = False
 _READY = Path(__file__).parent / ".sigint_ready"

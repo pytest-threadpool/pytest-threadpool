@@ -1,9 +1,9 @@
 """Tests for error and edge-case scenarios during parallel execution."""
 
+import shutil
 import signal
 import subprocess
 import sys
-import shutil
 import time
 
 from tests.conftest import CASES_DIR
@@ -19,8 +19,7 @@ def _run_and_sigint(ftdir, *, threads="3"):
     ready_path = ftdir.path / ".sigint_ready"
     ready_path.unlink(missing_ok=True)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pytest", str(ftdir.path),
-         "--freethreaded", threads],
+        [sys.executable, "-m", "pytest", str(ftdir.path), "--freethreaded", threads],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -37,13 +36,12 @@ def _run_and_sigint(ftdir, *, threads="3"):
     proc.send_signal(signal.SIGINT)
     try:
         stdout, stderr = proc.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         proc.kill()
         proc.wait()
         raise AssertionError(
-            "Process did not exit within 10s after SIGINT — "
-            "futures were not cancelled promptly"
-        )
+            "Process did not exit within 10s after SIGINT — futures were not cancelled promptly"
+        ) from exc
     return stdout, stderr, proc.returncode
 
 
@@ -60,7 +58,10 @@ class TestFreethreadedValidation:
         )
         result = ftdir.run_pytest("--freethreaded", "2")
         assert result.returncode != 0
-        assert "free-threaded Python build" in result.stderr or "free-threaded Python build" in result.stdout
+        assert (
+            "free-threaded Python build" in result.stderr
+            or "free-threaded Python build" in result.stdout
+        )
 
 
 class TestSetupFailures:
@@ -142,8 +143,12 @@ class TestCrossModuleParallelGroup:
         already-queued test items from earlier modules.
         """
         from tests.cases.edge_cross_module_group import (
-            INIT_SRC, MOD_A_SRC, MOD_B_SRC, MOD_C_SRC,
+            INIT_SRC,
+            MOD_A_SRC,
+            MOD_B_SRC,
+            MOD_C_SRC,
         )
+
         pkg = ftdir.mkdir("mypkg")
         (pkg / "__init__.py").write_text(INIT_SRC)
         (pkg / "test_mod_a.py").write_text(MOD_A_SRC)
@@ -156,8 +161,7 @@ class TestCrossModuleParallelGroup:
         """Cross-module group with yield fixtures: teardown doesn't break queued tests."""
         pkg = ftdir.mkdir("fixpkg")
         (pkg / "__init__.py").write_text(
-            "import pytest\n"
-            'pytestmark = pytest.mark.parallelizable("children")\n'
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
         )
         (pkg / "conftest.py").write_text(
             "import pytest\n"

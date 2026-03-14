@@ -3,9 +3,10 @@
 Placed alongside the test case as conftest.py by the outer test.
 Writes all entries to report_log.json in the same directory as this conftest.
 """
-import time
+
 import json
 import threading
+import time
 from pathlib import Path
 
 _lock = threading.Lock()

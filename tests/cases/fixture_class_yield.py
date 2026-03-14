@@ -1,10 +1,13 @@
 """Class-scoped yield fixture: setup before parallel, teardown after."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestYield:
-    log = []
+    log: ClassVar[list] = []
 
     @pytest.fixture(autouse=True, scope="class")
     def db(self):

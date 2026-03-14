@@ -7,8 +7,8 @@ from collections import OrderedDict
 
 from _pytest.runner import CallInfo, call_and_report, show_test_item
 
-from ._fixtures import FixtureManager
-from ._grouping import GroupKeyBuilder
+from pytest_freethreaded._fixtures import FixtureManager
+from pytest_freethreaded._grouping import GroupKeyBuilder
 
 # Test slot states
 _SCHEDULED = "scheduled"
@@ -60,6 +60,7 @@ class _LiveReporter:
         # detect capability
         self._live = (
             tr is not None
+            and self._tw is not None
             and hasattr(tr, "_tw")
             and self._tw.hasmarkup
             and session.config.get_verbosity() <= 0
@@ -102,6 +103,7 @@ class _LiveReporter:
         """Print all collected file lines with dim scheduled dots and a progress line."""
         if not self._live:
             return
+        assert self._file is not None
         f = self._file
         for fspath in self._file_order:
             self._write_line_live(fspath)
@@ -163,7 +165,7 @@ class _LiveReporter:
 
     def finish(self):
         """Reset terminal reporter state after live output."""
-        if self._live and self._tw:
+        if self._live and self._tw and self._file:
             # Finalize the progress line and move to the next line
             self._file.write("\n")
             self._file.flush()
@@ -178,6 +180,7 @@ class _LiveReporter:
 
     def _update_file_line(self, fspath):
         """Rewrite a single file line and progress using cursor movement (live mode)."""
+        assert self._file is not None
         f = self._file
         idx = self._file_idx[fspath]
         bottom = len(self._file_order)
@@ -191,7 +194,7 @@ class _LiveReporter:
 
     def _maybe_flush_file(self, fspath):
         """In dumb mode, write a file line once all its tests are done."""
-        if not self._tw:
+        if not self._tw or not self._file:
             return
         file_items = self._file_items[fspath]
         if all(self._item_state[it][0] == _DONE for it in file_items):
@@ -199,6 +202,7 @@ class _LiveReporter:
 
     def _write_line_live(self, fspath):
         """Write a file line with ANSI formatting (live terminal mode)."""
+        assert self._file is not None
         f = self._file
         rel = self._rel_path(fspath)
 
@@ -219,6 +223,7 @@ class _LiveReporter:
 
     def _write_line_plain(self, fspath):
         """Write a file line without ANSI codes (dumb/pipe mode)."""
+        assert self._file is not None
         f = self._file
         rel = self._rel_path(fspath)
         progress = f" [{100 * self._reported // self._total:3d}%]"
@@ -234,6 +239,7 @@ class _LiveReporter:
 
     def _write_progress_line(self):
         """Write/update the progress line at the bottom."""
+        assert self._file is not None
         f = self._file
         pct = 100 * self._reported // self._total
         f.write(f"\r\033[K{self._reported}/{self._total} [{pct:3d}%]")
@@ -255,14 +261,14 @@ class _LiveReporter:
         return "?"
 
     def _color_for(self, report):
-        if not self._tw.hasmarkup:
+        if not self._tw or not self._tw.hasmarkup:
             return ""
         if report.passed:
-            return "\033[32m"       # green
+            return "\033[32m"  # green
         if report.failed:
-            return "\033[31;1m"     # red bold
+            return "\033[31;1m"  # red bold
         if report.skipped:
-            return "\033[33m"       # yellow
+            return "\033[33m"  # yellow
         return ""
 
 
@@ -281,13 +287,10 @@ class ParallelRunner:
         """Main entry: group items and run each group."""
         session = self._session
 
-        if (
-            session.testsfailed
-            and not session.config.option.continue_on_collection_errors
-        ):
+        if session.testsfailed and not session.config.option.continue_on_collection_errors:
             raise session.Interrupted(
-                "%d error%s during collection"
-                % (session.testsfailed, "s" if session.testsfailed != 1 else "")
+                f"{session.testsfailed} error"
+                f"{'s' if session.testsfailed != 1 else ''} during collection"
             )
 
         if session.config.option.collectonly:
@@ -370,9 +373,7 @@ class ParallelRunner:
             setup_passed[item] = rep.passed
 
             if rep.passed:
-                per_item_fixture_fins[item] = (
-                    FixtureManager.save_and_clear_function_fixtures(item)
-                )
+                per_item_fixture_fins[item] = FixtureManager.save_and_clear_function_fixtures(item)
             else:
                 FixtureManager.clear_function_fixture_caches(item)
 
@@ -382,13 +383,9 @@ class ParallelRunner:
         if session.config.getoption("setuponly", False):
             for item in items:
                 ihook = item.ihook
-                ihook.pytest_runtest_logstart(
-                    nodeid=item.nodeid, location=item.location
-                )
+                ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
-                if setup_passed[item] and session.config.getoption(
-                    "setupshow", False
-                ):
+                if setup_passed[item] and session.config.getoption("setupshow", False):
                     show_test_item(item)
             self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
             return
@@ -404,13 +401,9 @@ class ParallelRunner:
 
         def _do_call(test_item):
             if cancelled.is_set():
-                return test_item, CallInfo.from_call(
-                    lambda: None, when="call"
-                )
+                return test_item, CallInfo.from_call(lambda: None, when="call")
             live.mark_running(test_item)
-            call_info = CallInfo.from_call(
-                lambda: test_item.runtest(), when="call"
-            )
+            call_info = CallInfo.from_call(lambda: test_item.runtest(), when="call")
             if not cancelled.is_set():
                 live.mark_call_done(test_item, call_info.excinfo)
             return test_item, call_info
@@ -423,11 +416,9 @@ class ParallelRunner:
             call_rep = None
             if setup_passed[item] and item in call_results:
                 call_info = call_results[item]
-                call_rep = ihook.pytest_runtest_makereport(
-                    item=item, call=call_info
-                )
+                call_rep = ihook.pytest_runtest_makereport(item=item, call=call_info)
 
-            report = call_rep if call_rep else setup_reports[item]
+            report = call_rep or setup_reports[item]
 
             # Suppress terminal reporter output, fire hooks for stats only.
             # try/finally ensures restore() runs even on KeyboardInterrupt,
@@ -435,9 +426,7 @@ class ParallelRunner:
             # interrupt traceback is silently lost.
             live.suppress()
             try:
-                ihook.pytest_runtest_logstart(
-                    nodeid=item.nodeid, location=item.location
-                )
+                ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
                 if setup_passed[item]:
                     if session.config.getoption("setupshow", False):
@@ -520,7 +509,7 @@ class ParallelRunner:
         self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
 
         if interrupted:
-            raise KeyboardInterrupt()
+            raise KeyboardInterrupt
 
     def _teardown_all(self, items, per_item_fixture_fins, saved_collector_fins) -> None:
         """Run per-item function-level finalizers, saved collector finalizers,
@@ -539,10 +528,8 @@ class ParallelRunner:
                         exceptions.append(e)
                 if len(exceptions) == 1:
                     raise exceptions[0]
-                elif exceptions:
-                    raise BaseExceptionGroup(
-                        "errors during fixture teardown", exceptions
-                    )
+                if exceptions:
+                    raise BaseExceptionGroup("errors during fixture teardown", exceptions)
 
             teardown_info = CallInfo.from_call(_run_fins, when="teardown")
             rep = item.ihook.pytest_runtest_makereport(item=item, call=teardown_info)
@@ -553,15 +540,13 @@ class ParallelRunner:
                 item._request = False  # pyright: ignore[reportPrivateUsage]
                 item.funcargs = None
 
-            item.ihook.pytest_runtest_logfinish(
-                nodeid=item.nodeid, location=item.location
-            )
+            item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
 
         # noinspection PyProtectedMember
         session._setupstate.teardown_exact(nextitem=None)  # pyright: ignore[reportPrivateUsage]
 
         exceptions = []
-        for node, fins in reversed(saved_collector_fins):
+        for _node, fins in reversed(saved_collector_fins):
             for fin in reversed(fins):
                 try:
                     fin()
@@ -569,7 +554,5 @@ class ParallelRunner:
                     exceptions.append(e)
         if len(exceptions) == 1:
             raise exceptions[0]
-        elif exceptions:
-            raise BaseExceptionGroup(
-                "errors during deferred collector teardown", exceptions
-            )
+        if exceptions:
+            raise BaseExceptionGroup("errors during deferred collector teardown", exceptions)

@@ -1,6 +1,6 @@
 """Fixture teardown exceptions must not skip remaining finalizers."""
-import pytest
 
+import pytest
 
 cleanup_log = []
 

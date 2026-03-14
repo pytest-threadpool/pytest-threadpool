@@ -1,10 +1,13 @@
 """setup_method runs per method even with parallel children."""
+
+from typing import ClassVar
+
 import pytest
 
 
 @pytest.mark.parallelizable("children")
 class TestMethodSetup:
-    log = []
+    log: ClassVar[list] = []
 
     def setup_method(self, method):
         self.log.append(f"setup_{method.__name__}")

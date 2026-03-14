@@ -1,4 +1,5 @@
 """Parametrized variants run concurrently with 'parameters' scope."""
+
 import threading
 
 import pytest

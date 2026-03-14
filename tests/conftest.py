@@ -1,11 +1,11 @@
 """Conftest for pytest-freethreaded plugin tests."""
 
 import os
+import re
 import select
 import shutil
 import subprocess
 import sys
-import re
 from pathlib import Path
 
 import pytest
@@ -24,12 +24,12 @@ class RunResult:
 
     def assert_outcomes(self, **expected):
         all_keys = {"passed", "failed", "errors", "skipped", "xfailed", "xpassed"}
-        defaults = {k: 0 for k in all_keys}
+        defaults = dict.fromkeys(all_keys, 0)
         defaults.update(expected)
         # Parse "X passed, Y failed, ..." from the summary line
         # Use singular forms too (pytest prints "1 error" not "1 errors")
         _singular = {"errors": "errors?"}
-        outcomes = {k: 0 for k in all_keys}
+        outcomes = dict.fromkeys(all_keys, 0)
         for line in reversed(self.outlines):
             for key in outcomes:
                 pat = _singular.get(key, key)
@@ -39,9 +39,7 @@ class RunResult:
             if any(k in line for k in outcomes):
                 break
         assert outcomes == defaults, (
-            f"Expected {defaults}, got {outcomes}\n"
-            f"stdout:\n{self.stdout}\n"
-            f"stderr:\n{self.stderr}"
+            f"Expected {defaults}, got {outcomes}\nstdout:\n{self.stdout}\nstderr:\n{self.stderr}"
         )
 
 
@@ -68,6 +66,7 @@ class FreethreadedTestDir:
     def makepyfile(self, source, name="test_file"):
         """Write a .py file into the test directory."""
         import textwrap
+
         p = self.path / f"{name}.py"
         p.write_text(textwrap.dedent(source))
         return p
@@ -81,9 +80,12 @@ class FreethreadedTestDir:
     def run_pytest(self, *extra_args, timeout=30):
         """Run pytest in a subprocess (piped, non-TTY)."""
         args = [
-            sys.executable, "-m", "pytest",
+            sys.executable,
+            "-m",
+            "pytest",
             str(self.path),
-            "--basetemp", str(self.path / ".tmp"),
+            "--basetemp",
+            str(self.path / ".tmp"),
             *extra_args,
         ]
         result = subprocess.run(
@@ -104,9 +106,12 @@ class FreethreadedTestDir:
         import pty
 
         args = [
-            sys.executable, "-m", "pytest",
+            sys.executable,
+            "-m",
+            "pytest",
             str(self.path),
-            "--basetemp", str(self.path / ".tmp"),
+            "--basetemp",
+            str(self.path / ".tmp"),
             *extra_args,
         ]
         master_fd, slave_fd = pty.openpty()
