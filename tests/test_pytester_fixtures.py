@@ -48,6 +48,12 @@ class TestFixturesUnderParallel:
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=4)
 
+    def test_interdependent_finalizer_ordering(self, ftdir):
+        """Dependent fixtures tear down in LIFO order (tx before db)."""
+        ftdir.copy_case("fixture_interdependent_finalizers")
+        result = ftdir.run_pytest("--freethreaded", "2")
+        result.assert_outcomes(passed=3)
+
     def test_fixture_teardown_exception_runs_all_finalizers(self, ftdir):
         """A failing finalizer must not prevent remaining finalizers from running."""
         ftdir.copy_case("fixture_teardown_exception")

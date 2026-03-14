@@ -36,3 +36,31 @@ class TestSetupFailures:
         result = ftdir.run_pytest("--freethreaded", "3")
         assert "2 passed" in result.stdout
         assert "1 error" in result.stdout
+
+
+class TestExceptionHandling:
+    """Verify BaseException subclasses are handled during parallel execution."""
+
+    def test_system_exit_in_test_body(self, ftdir):
+        """SystemExit in a parallel test body is caught and reported as failure."""
+        ftdir.copy_case("edge_system_exit")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        assert "1 failed" in result.stdout
+        assert "2 passed" in result.stdout
+
+    def test_keyboard_interrupt_in_test_body(self, ftdir):
+        """KeyboardInterrupt in a parallel test body is caught and reported as failure."""
+        ftdir.copy_case("edge_keyboard_interrupt")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        assert "1 failed" in result.stdout
+        assert "2 passed" in result.stdout
+
+
+class TestConcurrencyEdgeCases:
+    """Verify edge cases around thread interaction."""
+
+    def test_nested_threads(self, ftdir):
+        """Tests that spawn their own threads work correctly in parallel."""
+        ftdir.copy_case("edge_nested_threads")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        result.assert_outcomes(passed=4)
