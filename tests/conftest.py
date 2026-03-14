@@ -21,10 +21,11 @@ class RunResult:
         self.outlines = stdout.splitlines()
 
     def assert_outcomes(self, **expected):
-        defaults = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+        all_keys = {"passed", "failed", "errors", "skipped", "xfailed", "xpassed"}
+        defaults = {k: 0 for k in all_keys}
         defaults.update(expected)
         # Parse "X passed, Y failed, ..." from the summary line
-        outcomes = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+        outcomes = {k: 0 for k in all_keys}
         for line in reversed(self.outlines):
             for key in outcomes:
                 m = re.search(rf"(\d+) {key}", line)

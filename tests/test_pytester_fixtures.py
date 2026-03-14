@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestFixturesUnderParallel:
     """Verify fixture setup/teardown behaves correctly with parallel children."""
 

@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestParallelScopes:
     """Verify parameters, all, children scopes and override priority."""
 

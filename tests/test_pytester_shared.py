@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestSharedStateUnderParallel:
     """Verify thread-safe dict/counter operations with parallel children."""
 

@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestXunitUnderParallel:
     """Verify xunit setup/teardown hooks work correctly with parallel children."""
 

@@ -5,7 +5,6 @@ import pytest
 from tests.cases._templates import sequential_order_class
 
 
-@pytest.mark.parallelizable("children")
 class TestPackageLevelParallel:
     """Verify package pytestmark propagation across modules and subpackages."""
 

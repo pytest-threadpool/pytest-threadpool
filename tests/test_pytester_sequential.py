@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestSequentialExecution:
     """Verify unmarked tests run sequentially even with --freethreaded."""
 

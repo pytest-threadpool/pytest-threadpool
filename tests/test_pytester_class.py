@@ -3,7 +3,6 @@
 import pytest
 
 
-@pytest.mark.parallelizable("children")
 class TestClassParallel:
     """Verify @parallelizable('children') on classes via isolated subprocess runs."""
 
