@@ -23,6 +23,7 @@ freethreaded = "pytest_freethreaded.plugin"
 
 [dependency-groups]
 dev = [
+    "pytest-cov>=6.0",
     "pyright>=1.1",
     "ruff>=0.9",
 ]
