@@ -27,10 +27,13 @@ class RunResult:
         defaults = {k: 0 for k in all_keys}
         defaults.update(expected)
         # Parse "X passed, Y failed, ..." from the summary line
+        # Use singular forms too (pytest prints "1 error" not "1 errors")
+        _singular = {"errors": "errors?"}
         outcomes = {k: 0 for k in all_keys}
         for line in reversed(self.outlines):
             for key in outcomes:
-                m = re.search(rf"(\d+) {key}", line)
+                pat = _singular.get(key, key)
+                m = re.search(rf"(\d+) {pat}", line)
                 if m:
                     outcomes[key] = int(m.group(1))
             if any(k in line for k in outcomes):

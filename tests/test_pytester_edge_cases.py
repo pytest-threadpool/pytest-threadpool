@@ -1,5 +1,5 @@
 """Tests for error and edge-case scenarios during parallel execution."""
-import os
+
 import signal
 import subprocess
 import sys
@@ -96,3 +96,59 @@ class TestConcurrencyEdgeCases:
             )
         assert proc.returncode != 0
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
+
+
+class TestCrossModuleParallelGroup:
+    """Verify cross-module parallel groups complete without hanging."""
+
+    def test_cross_module_package_group_all_complete(self, ftdir):
+        """Tests from multiple modules in one package group all complete.
+
+        Reproduces the scenario where package-level parallelizable("children")
+        groups tests from different modules/classes into a single parallel batch.
+        Setup/teardown of class/module collectors must not interfere with
+        already-queued test items from earlier modules.
+        """
+        from tests.cases.edge_cross_module_group import (
+            INIT_SRC, MOD_A_SRC, MOD_B_SRC, MOD_C_SRC,
+        )
+        pkg = ftdir.mkdir("mypkg")
+        (pkg / "__init__.py").write_text(INIT_SRC)
+        (pkg / "test_mod_a.py").write_text(MOD_A_SRC)
+        (pkg / "test_mod_b.py").write_text(MOD_B_SRC)
+        (pkg / "test_mod_c.py").write_text(MOD_C_SRC)
+        result = ftdir.run_pytest("--freethreaded", "4", str(pkg))
+        result.assert_outcomes(passed=10)
+
+    def test_cross_module_with_fixtures_all_complete(self, ftdir):
+        """Cross-module group with yield fixtures: teardown doesn't break queued tests."""
+        pkg = ftdir.mkdir("fixpkg")
+        (pkg / "__init__.py").write_text(
+            "import pytest\n"
+            'pytestmark = pytest.mark.parallelizable("children")\n'
+        )
+        (pkg / "conftest.py").write_text(
+            "import pytest\n"
+            "teardown_log = []\n"
+            "\n"
+            "@pytest.fixture\n"
+            "def tracked(request):\n"
+            "    yield request.node.name\n"
+            "    teardown_log.append(request.node.name)\n"
+        )
+        (pkg / "test_first.py").write_text(
+            "class TestFirst:\n"
+            "    def test_f1(self, tracked):\n"
+            "        assert tracked == 'test_f1'\n"
+            "    def test_f2(self, tracked):\n"
+            "        assert tracked == 'test_f2'\n"
+        )
+        (pkg / "test_second.py").write_text(
+            "class TestSecond:\n"
+            "    def test_s1(self, tracked):\n"
+            "        assert tracked == 'test_s1'\n"
+            "    def test_s2(self, tracked):\n"
+            "        assert tracked == 'test_s2'\n"
+        )
+        result = ftdir.run_pytest("--freethreaded", "4", str(pkg))
+        result.assert_outcomes(passed=4)
