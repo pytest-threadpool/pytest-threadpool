@@ -23,3 +23,15 @@ class TestSharedStateUnderParallel:
         ftdir.copy_case("shared_two_phase_barrier")
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
+
+    def test_non_pickleable_objects(self, ftdir):
+        """Non-pickleable thread-safe objects (Lock, Condition, etc.) work in parallel groups."""
+        ftdir.copy_case("shared_non_pickleable")
+        result = ftdir.run_pytest("--freethreaded", "4")
+        result.assert_outcomes(passed=5)
+
+    def test_cross_group_non_pickleable_objects(self, ftdir):
+        """Non-pickleable objects shared across different parallel groups stay consistent."""
+        ftdir.copy_case("shared_cross_group_non_pickleable")
+        result = ftdir.run_pytest("--freethreaded", "2")
+        result.assert_outcomes(passed=5)
