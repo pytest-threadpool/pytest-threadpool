@@ -37,6 +37,28 @@ class FixtureManager:
         return saved
 
     @staticmethod
+    def clear_function_fixture_caches(item) -> None:
+        """Invalidate function-scoped fixture caches after a failed setup.
+
+        When setup fails, the fixture def's execute() raises before
+        registering in request._fixture_defs.  We use _arg2fixturedefs
+        (populated during collection) to find all candidate fixture defs.
+        """
+        request = getattr(item, "_request", None)
+        if not request:
+            return
+
+        # noinspection PyProtectedMember
+        # request._arg2fixturedefs: populated during collection, maps
+        # argname -> list[FixtureDef].  Unlike _fixture_defs, this is
+        # available even when setup fails mid-execution.
+        arg2fds = getattr(request, "_arg2fixturedefs", {})
+        for fixturedefs in arg2fds.values():  # pyright: ignore[reportPrivateUsage]
+            for fixturedef in fixturedefs:
+                if fixturedef._scope is Scope.Function and fixturedef.cached_result is not None:  # pyright: ignore[reportPrivateUsage]
+                    fixturedef.cached_result = None
+
+    @staticmethod
     def save_collector_finalizers(session, next_item) -> list:
         """Save finalizers from stack nodes that would be torn down when
         transitioning to next_item.  Clears them from the stack so

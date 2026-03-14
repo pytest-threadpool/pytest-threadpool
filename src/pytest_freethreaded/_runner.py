@@ -342,6 +342,8 @@ class ParallelRunner:
                 per_item_fixture_fins[item] = (
                     FixtureManager.save_and_clear_function_fixtures(item)
                 )
+            else:
+                FixtureManager.clear_function_fixture_caches(item)
 
             if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
                 session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
