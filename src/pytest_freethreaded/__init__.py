@@ -1,4 +1,4 @@
-"""pytest-threaded: Parallel test execution for free-threaded Python."""
+"""pytest-freethreaded: Parallel test execution for free-threaded Python."""
 
 from typing import Literal
 
@@ -16,7 +16,7 @@ def parallelizable(
 
     Args:
         scope: Parallelism strategy.
-            ``"children"`` -- direct children run concurrently.
+            ``"children"`` -- all nested tests run concurrently.
             ``"parameters"`` -- parametrized variants run concurrently.
             ``"all"`` -- children + parameters combined.
     """

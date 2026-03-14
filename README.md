@@ -1,30 +1,38 @@
-# pytest-threaded
+# pytest-freethreaded
 
 Parallel test execution for free-threaded Python builds (3.13t+).
 
 Runs test *bodies* concurrently in a `ThreadPoolExecutor` while keeping
 fixture setup/teardown sequential (pytest internals are not thread-safe).
 
+> **Note:** Python 3.14t ships with the GIL disabled by default —
+> `PYTHON_GIL=0` is only needed on 3.13t. We recommend using 3.14t+
+> for the best free-threaded experience.
+
 ## Installation
 
 ```bash
-pip install pytest-threaded
+pip install pytest-freethreaded
 ```
 
 ## Quick start
 
 ```bash
-PYTHON_GIL=0 pytest --threaded auto
+# Python 3.14t (GIL off by default)
+pytest --freethreaded auto
+
+# Python 3.13t (must disable GIL explicitly)
+PYTHON_GIL=0 pytest --freethreaded auto
 ```
 
 Mark tests for parallel execution:
 
 ```python
-from pytest_threaded import parallelizable, not_parallelizable
+from pytest_freethreaded import parallelizable, not_parallelizable
 
 import pytest
 
-@parallelizable("children")     # methods run in parallel
+@parallelizable("children")     # all nested tests run in parallel
 class TestMyFeature:
     def test_a(self): ...
     def test_b(self): ...
@@ -45,11 +53,11 @@ def test_must_be_sequential(): ...
 
 ## Scopes
 
-| Scope        | Effect                                                  |
-|--------------|---------------------------------------------------------|
-| `children`   | Direct children of the marked node run concurrently     |
-| `parameters` | Parametrized variants of the same test run concurrently |
-| `all`        | Combines `children` + `parameters`                      |
+| Scope        | Effect                                                            |
+|--------------|-------------------------------------------------------------------|
+| `children`   | All nested tests run concurrently (children, grandchildren, etc.) |
+| `parameters` | Parametrized variants of the same test run concurrently           |
+| `all`        | Combines `children` + `parameters`                                |
 
 ## Marker levels
 
@@ -64,10 +72,10 @@ not_parallelizable > own marker > class > module > package
 
 ```bash
 # Auto-detect thread count
-PYTHON_GIL=0 pytest --threaded auto
+pytest --freethreaded auto
 
 # Fixed thread count
-PYTHON_GIL=0 pytest --threaded 8
+pytest --freethreaded 8
 
 # Normal sequential run (no flag)
 pytest

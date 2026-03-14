@@ -1,5 +1,5 @@
 [project]
-name = "pytest-threaded"
+name = "pytest-freethreaded"
 version = "0.1.0"
 description = "Parallel test execution for free-threaded Python builds"
 requires-python = ">=3.13"
@@ -19,14 +19,13 @@ dependencies = [
 ]
 
 [project.entry-points.pytest11]
-threaded = "pytest_threaded.plugin"
+freethreaded = "pytest_freethreaded.plugin"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pytest_threaded"]
+packages = ["src/pytest_freethreaded"]
 
 [tool.pytest.ini_options]
-addopts = ["--threaded", "auto"]

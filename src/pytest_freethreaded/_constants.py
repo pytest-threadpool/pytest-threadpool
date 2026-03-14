@@ -1,9 +1,9 @@
-"""Constants and enums for pytest-threaded."""
+"""Constants and enums for pytest-freethreaded."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ParallelScope(str, Enum):
+class ParallelScope(StrEnum):
     """Parallelism strategies for test execution."""
 
     CHILDREN = "children"
@@ -18,7 +18,7 @@ MARKER_NOT_PARALLELIZABLE = "not_parallelizable"
 MARKER_PARALLEL_ONLY = "parallel_only"
 
 
-class _GroupPrefix(str, Enum):
+class _GroupPrefix(StrEnum):
     """Internal group key prefixes for parallel batching."""
 
     CLASS = "class"

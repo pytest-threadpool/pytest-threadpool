@@ -15,7 +15,7 @@ from ._runner import ParallelRunner
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--threaded",
+        "--freethreaded",
         default=None,
         metavar="N",
         help=(
@@ -28,7 +28,7 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        f"{MARKER_PARALLEL_ONLY}: skip test when not using --threaded",
+        f"{MARKER_PARALLEL_ONLY}: skip test when not using --freethreaded",
     )
     config.addinivalue_line(
         "markers",
@@ -42,9 +42,9 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("threaded") is not None:
+    if config.getoption("freethreaded") is not None:
         return
-    skip = pytest.mark.skip(reason="requires --threaded")
+    skip = pytest.mark.skip(reason="requires --freethreaded")
     for item in items:
         if (
             MARKER_PARALLEL_ONLY in item.keywords
@@ -63,7 +63,7 @@ def pytest_runtestloop(session):
 
 
 def _thread_count(config) -> int | None:
-    val = config.getoption("threaded")
+    val = config.getoption("freethreaded")
     if val is None:
         return None
     if val == "auto":
