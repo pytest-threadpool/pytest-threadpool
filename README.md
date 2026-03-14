@@ -1,5 +1,12 @@
 # pytest-freethreaded
 
+[![PyPI](https://img.shields.io/pypi/v/pytest-freethreaded.svg)](https://pypi.org/project/pytest-freethreaded/)
+[![Python](https://img.shields.io/pypi/pyversions/pytest-freethreaded.svg)](https://pypi.org/project/pytest-freethreaded/)
+[![License](https://img.shields.io/github/license/pytest-freethreaded/pytest-freethreaded)](https://github.com/pytest-freethreaded/pytest-freethreaded/blob/main/LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-pytest--freethreaded-blue?logo=github)](https://github.com/pytest-freethreaded/pytest-freethreaded)
+[![CI](https://github.com/pytest-freethreaded/pytest-freethreaded/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-freethreaded/pytest-freethreaded/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pytest-freethreaded/pytest-freethreaded/branch/main/graph/badge.svg)](https://codecov.io/gh/pytest-freethreaded/pytest-freethreaded)
+
 Parallel test execution for free-threaded Python builds (3.13t+).
 
 Runs test *bodies* concurrently in a `ThreadPoolExecutor` while keeping
