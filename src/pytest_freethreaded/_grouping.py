@@ -35,7 +35,7 @@ class GroupKeyBuilder:
         child_parallel = False
         param_parallel = False
 
-        # Most specific level with an explicit marker determines behavior
+        # The most specific level with an explicit marker determines behavior
         if own is not None:
             if own == ParallelScope.ALL:
                 child_parallel = True
@@ -94,7 +94,7 @@ class GroupKeyBuilder:
     def build_groups(items) -> list[tuple[object, list]]:
         """Group consecutive items by parallel group key.
 
-        Returns list of (key, [items]) tuples.
+        Returns a list of (key, [items]) tuples.
         """
         groups: list[tuple[object, list]] = []
         prev_key = object()

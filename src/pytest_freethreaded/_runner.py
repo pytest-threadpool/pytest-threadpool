@@ -86,13 +86,14 @@ class _LiveReporter:
     # -- pre-print all files --------------------------------------------------
 
     def pre_print(self):
-        """Print all collected file lines with dim scheduled dots."""
+        """Print all collected file lines with dim scheduled dots and a progress line."""
         if not self._live:
             return
         f = self._tw._file
         for fspath in self._file_order:
-            self._write_line(fspath)
+            self._write_line_live(fspath)
             f.write("\n")
+        self._write_progress_line()
         f.flush()
 
     # -- state transitions ----------------------------------------------------
@@ -105,7 +106,12 @@ class _LiveReporter:
                 self._update_file_line(item.fspath)
 
     def mark_done(self, item, report):
-        """Mark a test as completed and update its file line."""
+        """Mark a test as completed and update its file line.
+
+        In live mode, updates in-place with cursor movement.
+        In dumb mode, writes the full file line once all tests in
+        that file have completed (no cursor movement needed).
+        """
         with self._lock:
             self._reported += 1
             letter = self._letter_for(report)
@@ -113,9 +119,15 @@ class _LiveReporter:
             self._item_state[item] = (_DONE, letter, color)
             if self._live:
                 self._update_file_line(item.fspath)
+            else:
+                self._maybe_flush_file(item.fspath)
 
     def finish(self):
         """Reset terminal reporter state after live output."""
+        if self._live and self._tw:
+            # Finalize the progress line and move to the next line
+            self._tw._file.write("\n")
+            self._tw._file.flush()
         if self._tr:
             self._tr.currentfspath = None
             self._tr._write_progress_information_filling_space = lambda: None
@@ -123,50 +135,72 @@ class _LiveReporter:
     # -- internals ------------------------------------------------------------
 
     def _update_file_line(self, fspath):
-        """Rewrite a single file line using cursor movement."""
+        """Rewrite a single file line and progress using cursor movement (live mode)."""
         f = self._tw._file
         idx = self._file_idx[fspath]
         bottom = len(self._file_order)
         lines_up = bottom - idx
         f.write(f"\033[{lines_up}A")
-        self._write_line(fspath)
+        self._write_line_live(fspath)
         f.write(f"\033[{lines_up}B")
         f.write("\r")
+        self._write_progress_line()
         f.flush()
 
-    def _write_line(self, fspath):
-        f = self._tw._file
-        try:
-            rel = os.path.relpath(str(fspath), str(self._startpath))
-        except ValueError:
-            rel = str(fspath)
+    def _maybe_flush_file(self, fspath):
+        """In dumb mode, write a file line once all its tests are done."""
+        if not self._tw:
+            return
+        file_items = self._file_items[fspath]
+        if all(self._item_state[it][0] == _DONE for it in file_items):
+            self._write_line_plain(fspath)
 
-        progress = f" [{100 * self._reported // self._total:3d}%]"
+    def _write_line_live(self, fspath):
+        """Write a file line with ANSI formatting (live terminal mode)."""
+        f = self._tw._file
+        rel = self._rel_path(fspath)
 
         f.write("\r\033[K")
         f.write(rel + " ")
 
-        n_slots = 0
         for item in self._file_items[fspath]:
             state, letter, color = self._item_state[item]
-            n_slots += 1
             if state == _SCHEDULED:
-                # middle dot — visually lighter than result letters
-                f.write(f"\033[2m·\033[0m")
+                f.write("\033[2m·\033[0m")
             elif state == _RUNNING:
-                # bright cyan indicator
-                f.write(f"\033[36;1m●\033[0m")
+                f.write("\033[36;1m●\033[0m")
             else:
-                # completed — colored result
                 if color:
                     f.write(f"{color}{letter}\033[0m")
                 else:
                     f.write(letter)
 
-        used = len(rel) + 1 + n_slots + len(progress)
-        if used < self._width:
-            f.write(" " * (self._width - used))
-        f.write(progress)
+    def _write_line_plain(self, fspath):
+        """Write a file line without ANSI codes (dumb/pipe mode)."""
+        f = self._tw._file
+        rel = self._rel_path(fspath)
+        progress = f" [{100 * self._reported // self._total:3d}%]"
+
+        letters = ""
+        for item in self._file_items[fspath]:
+            _, letter, _ = self._item_state[item]
+            letters += letter
+
+        line = f"{rel} {letters}{progress}\n"
+        f.write(line)
+        f.flush()
+
+    def _write_progress_line(self):
+        """Write/update the progress line at the bottom."""
+        f = self._tw._file
+        pct = 100 * self._reported // self._total
+        f.write(f"\r\033[K{self._reported}/{self._total} [{pct:3d}%]")
+
+    def _rel_path(self, fspath):
+        try:
+            return os.path.relpath(str(fspath), str(self._startpath))
+        except ValueError:
+            return str(fspath)
 
     @staticmethod
     def _letter_for(report):
@@ -261,7 +295,7 @@ class ParallelRunner:
 
         1. Sequential: setup every item (no reporting yet).
         2. Parallel:   item.runtest() in a thread pool.
-        3. Sequential: report setup + call results per item.
+        3. Sequential: report setup and call results per item.
         4. Sequential: teardown.
         """
         session = self._session
@@ -328,7 +362,7 @@ class ParallelRunner:
             """Report a single item — live cursor mode or plain fallback."""
             ihook = item.ihook
 
-            # Build the call report first (needed for live dot letter)
+            # Build the call report first (needed for a live dot letter)
             call_rep = None
             if setup_passed[item] and item in call_results:
                 call_info = call_results[item]
@@ -338,31 +372,19 @@ class ParallelRunner:
 
             report = call_rep if call_rep else setup_reports[item]
 
-            if live.live:
-                # Suppress terminal reporter output, fire hooks for stats
-                live.suppress()
-                ihook.pytest_runtest_logstart(
-                    nodeid=item.nodeid, location=item.location
-                )
-                ihook.pytest_runtest_logreport(report=setup_reports[item])
-                if setup_passed[item]:
-                    if session.config.getoption("setupshow", False):
-                        show_test_item(item)
-                    if call_rep is not None:
-                        ihook.pytest_runtest_logreport(report=call_rep)
-                live.restore()
-                live.mark_done(item, report)
-            else:
-                # Plain fallback (non-TTY, verbose, etc.)
-                ihook.pytest_runtest_logstart(
-                    nodeid=item.nodeid, location=item.location
-                )
-                ihook.pytest_runtest_logreport(report=setup_reports[item])
-                if setup_passed[item]:
-                    if session.config.getoption("setupshow", False):
-                        show_test_item(item)
-                    if call_rep is not None:
-                        ihook.pytest_runtest_logreport(report=call_rep)
+            # Suppress terminal reporter output, fire hooks for stats only
+            live.suppress()
+            ihook.pytest_runtest_logstart(
+                nodeid=item.nodeid, location=item.location
+            )
+            ihook.pytest_runtest_logreport(report=setup_reports[item])
+            if setup_passed[item]:
+                if session.config.getoption("setupshow", False):
+                    show_test_item(item)
+                if call_rep is not None:
+                    ihook.pytest_runtest_logreport(report=call_rep)
+            live.restore()
+            live.mark_done(item, report)
 
             reported.add(item)
 
@@ -395,8 +417,7 @@ class ParallelRunner:
             if item not in reported:
                 _report_item(item)
 
-        if live.live:
-            live.finish()
+        live.finish()
 
         # Phase 4: teardown
         self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)

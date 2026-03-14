@@ -57,7 +57,7 @@ def pytest_collection_modifyitems(config, items):
 def pytest_runtestloop(session):
     nthreads = _thread_count(session.config)
     if nthreads is None:
-        return  # fall through to default sequential runner
+        return None
     runner = ParallelRunner(session, nthreads)
     return runner.run_all()
 

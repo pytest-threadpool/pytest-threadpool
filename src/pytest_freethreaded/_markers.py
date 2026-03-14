@@ -19,7 +19,7 @@ class MarkerResolver:
 
     @staticmethod
     def scope_from_marks(marks) -> str | None:
-        """Extract parallelizable scope from a list of pytest marks."""
+        """Extract a parallelizable scope from a list of pytest marks."""
         if not isinstance(marks, (list, tuple)):
             marks = [marks]
         for m in marks:
