@@ -71,6 +71,11 @@ class _LiveReporter:
         # that bypass TerminalWriter formatting.
         self._file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
 
+        # Pre-compute colors for worker-thread display updates
+        markup = self._tw.hasmarkup if self._tw else False
+        self._pass_color = "\033[32m" if markup else ""
+        self._fail_color = "\033[31;1m" if markup else ""
+
     @property
     def live(self):
         return self._live
@@ -119,11 +124,37 @@ class _LiveReporter:
         In live mode, updates in-place with cursor movement.
         In dumb mode, writes the full file line once all tests in
         that file have completed (no cursor movement needed).
+
+        If already marked done by mark_call_done, corrects the letter
+        if the final report differs (e.g. skip detected as failure).
+        """
+        with self._lock:
+            letter = self._letter_for(report)
+            color = self._color_for(report)
+            already_done = self._item_state[item][0] == _DONE
+            if already_done and self._item_state[item][1] == letter:
+                return
+            if not already_done:
+                self._reported += 1
+            self._item_state[item] = (_DONE, letter, color)
+            if self._live:
+                self._update_file_line(item.fspath)
+            else:
+                self._maybe_flush_file(item.fspath)
+
+    def mark_call_done(self, item, excinfo):
+        """Mark a test call as completed from the worker thread.
+
+        Uses excinfo to determine pass/fail immediately, so the display
+        updates as soon as the call finishes rather than waiting for the
+        main thread to process hooks.
         """
         with self._lock:
             self._reported += 1
-            letter = self._letter_for(report)
-            color = self._color_for(report)
+            if excinfo is None:
+                letter, color = ".", self._pass_color
+            else:
+                letter, color = "F", self._fail_color
             self._item_state[item] = (_DONE, letter, color)
             if self._live:
                 self._update_file_line(item.fspath)
@@ -372,10 +403,16 @@ class ParallelRunner:
         live.pre_print()
 
         def _do_call(test_item):
+            if cancelled.is_set():
+                return test_item, CallInfo.from_call(
+                    lambda: None, when="call"
+                )
             live.mark_running(test_item)
             call_info = CallInfo.from_call(
                 lambda: test_item.runtest(), when="call"
             )
+            if not cancelled.is_set():
+                live.mark_call_done(test_item, call_info.excinfo)
             return test_item, call_info
 
         def _report_item(item):
@@ -409,6 +446,7 @@ class ParallelRunner:
             reported.add(item)
 
         interrupted = False
+        cancelled = threading.Event()
         if workers > 1 and len(callable_items) > 1:
             work_queue = queue.SimpleQueue()
             result_queue = queue.SimpleQueue()
@@ -416,9 +454,18 @@ class ParallelRunner:
             def _pool_worker():
                 while True:
                     work_item = work_queue.get()
-                    if work_item is None:
+                    if work_item is None or cancelled.is_set():
                         return
-                    result = _do_call(work_item)
+                    try:
+                        result = _do_call(work_item)
+                    except BaseException as exc:
+                        # Ensure the result queue always gets an entry so the
+                        # main thread never blocks forever on .get().
+                        call_info = CallInfo.from_call(
+                            lambda e=exc: (_ for _ in ()).throw(e),
+                            when="call",
+                        )
+                        result = (work_item, call_info)
                     result_queue.put(result)
 
             threads = []
@@ -439,6 +486,7 @@ class ParallelRunner:
                     remaining -= 1
             except KeyboardInterrupt:
                 interrupted = True
+                cancelled.set()
 
             # Signal workers to stop (best-effort; they're daemon threads)
             for _ in range(workers):
