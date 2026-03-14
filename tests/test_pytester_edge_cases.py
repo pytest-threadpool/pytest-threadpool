@@ -9,6 +9,34 @@ import time
 from tests.conftest import CASES_DIR
 
 
+def _run_and_sigint(ftdir, *, threads="3"):
+    """Launch pytest in a subprocess and send SIGINT after 1s.
+
+    Returns (stdout, stderr, returncode).  Kills the process if it
+    doesn't exit within 10s.
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pytest", str(ftdir.path),
+         "--freethreaded", threads],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(ftdir.path),
+    )
+    time.sleep(1)
+    proc.send_signal(signal.SIGINT)
+    try:
+        stdout, stderr = proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise AssertionError(
+            "Process did not exit within 10s after SIGINT — "
+            "futures were not cancelled promptly"
+        )
+    return stdout, stderr, proc.returncode
+
+
 class TestFreethreadedValidation:
     """Verify the plugin rejects --freethreaded on GIL-enabled Python."""
 
@@ -73,28 +101,22 @@ class TestConcurrencyEdgeCases:
     def test_sigint_exits_promptly(self, ftdir):
         """SIGINT during parallel execution cancels futures and exits promptly."""
         ftdir.copy_case("edge_sigint")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pytest", str(ftdir.path),
-             "--freethreaded", "3"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(ftdir.path),
-        )
-        # Wait briefly for tests to start running, then send SIGINT
-        time.sleep(1)
-        proc.send_signal(signal.SIGINT)
-        # Must exit within a few seconds, not 30s
-        try:
-            stdout, stderr = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise AssertionError(
-                "Process did not exit within 10s after SIGINT — "
-                "futures were not cancelled promptly"
-            )
-        assert proc.returncode != 0
+        stdout, stderr, rc = _run_and_sigint(ftdir, threads="3")
+        assert rc != 0
+        assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
+
+    def test_sigint_many_threads_preserves_output(self, ftdir):
+        """SIGINT with many threads must not swallow output.
+
+        Regression: live.suppress() replaced the terminal writer with no-ops.
+        If KeyboardInterrupt arrived inside the suppress window, restore()
+        was skipped and pytest's interrupt traceback was silently lost.
+        With many threads, results stream faster so the main thread spends
+        more time in the suppress window, making this race very likely.
+        """
+        ftdir.copy_case("edge_sigint_many")
+        stdout, stderr, rc = _run_and_sigint(ftdir, threads="20")
+        assert rc != 0
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
 
 
