@@ -26,8 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - run: uv python install ${{ matrix.python }}
       - run: uv sync --python ${{ matrix.python }} --group dev
-      - run: uv run pytest -v --tb=short --cov=pytest_freethreaded --cov-report=xml
+      - run: uv run --python ${{ matrix.python }} pytest -v --tb=short --cov=pytest_freethreaded --cov-report=xml
       - uses: codecov/codecov-action@v5
         if: matrix.python == '3.14t'
         with:
