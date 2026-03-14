@@ -1,23 +1,5 @@
-"""Typed wrappers for parallel test markers with IDE autocompletion."""
+"""Re-export typed marker wrappers from the package."""
 
-from typing import Literal
+from pytest_threaded import not_parallelizable, parallelizable
 
-import pytest
-
-
-def parallelizable(
-    scope: Literal["children", "parameters", "all"],
-) -> pytest.MarkDecorator:
-    """Mark a test/class/module for parallel execution.
-
-    Args:
-        scope: Parallelism strategy.
-            ``"children"`` -- direct children run concurrently.
-            ``"parameters"`` -- parametrized variants run concurrently.
-            ``"all"`` -- children + parameters combined.
-    """
-    return pytest.mark.parallelizable(scope)
-
-
-not_parallelizable: pytest.MarkDecorator = pytest.mark.not_parallelizable
-"""Opt out of inherited parallel execution."""
+__all__ = ["not_parallelizable", "parallelizable"]
