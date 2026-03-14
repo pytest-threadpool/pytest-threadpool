@@ -1,7 +1,13 @@
-"""conftest that fakes a GIL-enabled Python for testing the validation."""
-import sys
+"""conftest that fakes a GIL-enabled Python build for testing the validation."""
+import sysconfig
+
+_original = sysconfig.get_config_var
 
 
-def pytest_configure(config):
-    # Override _is_gil_enabled to simulate a GIL-enabled build
-    sys._is_gil_enabled = lambda: True
+def _patched(name):
+    if name == "Py_GIL_DISABLED":
+        return 0
+    return _original(name)
+
+
+sysconfig.get_config_var = _patched

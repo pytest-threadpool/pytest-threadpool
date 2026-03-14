@@ -62,7 +62,7 @@ def pytest_runtestloop(session):
     if not _is_free_threaded():
         raise pytest.UsageError(
             "--freethreaded requires a free-threaded Python build "
-            "(e.g. python3.13t or python3.14t with PYTHON_GIL=0)"
+            "(e.g. python3.13t with PYTHON_GIL=0, or python3.14t)"
         )
     runner = ParallelRunner(session, nthreads)
     return runner.run_all()
@@ -78,8 +78,7 @@ def _thread_count(config) -> int | None:
 
 
 def _is_free_threaded() -> bool:
-    """Check if running on a free-threaded Python build with the GIL disabled."""
-    is_gil_enabled = getattr(sys, "_is_gil_enabled", None)
-    if is_gil_enabled is None:
-        return False  # Python < 3.13, no free-threading support
-    return not is_gil_enabled()
+    """Check if running on a free-threaded Python build (GIL can be disabled)."""
+    import sysconfig
+
+    return bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
