@@ -4,7 +4,13 @@ from _pytest.scope import Scope
 
 
 class FixtureManager:
-    """Helpers for saving/restoring fixture finalizers during parallel execution."""
+    """Helpers for saving/restoring fixture finalizers during parallel execution.
+
+    Uses protected members of pytest internals (FixtureDef, TopRequest,
+    SetupState) because there is no public API for direct finalizer
+    manipulation.  These are the same internals that pytest's own
+    runner.py and fixtures.py use.
+    """
 
     @staticmethod
     def save_and_clear_function_fixtures(item) -> list:
@@ -18,10 +24,14 @@ class FixtureManager:
         if not request or not hasattr(request, "_fixture_defs"):
             return saved
 
-        for fixturedef in request._fixture_defs.values():
-            if fixturedef._scope is Scope.Function:
-                saved.extend(fixturedef._finalizers)
-                fixturedef._finalizers.clear()
+        # noinspection PyProtectedMember
+        # request._fixture_defs, fixturedef._scope, fixturedef._finalizers:
+        # No public API for direct finalizer access; mirrors pytest's own
+        # FixtureDef/TopRequest internals.
+        for fixturedef in request._fixture_defs.values():  # pyright: ignore[reportPrivateUsage]
+            if fixturedef._scope is Scope.Function:  # pyright: ignore[reportPrivateUsage]
+                saved.extend(fixturedef._finalizers)  # pyright: ignore[reportPrivateUsage]
+                fixturedef._finalizers.clear()  # pyright: ignore[reportPrivateUsage]
                 fixturedef.cached_result = None
 
         return saved
@@ -36,9 +46,12 @@ class FixtureManager:
         """
         needed = set(next_item.listchain())
         saved = []
-        for node in list(session._setupstate.stack):
+        # noinspection PyProtectedMember
+        # session._setupstate: no public API for setup state management;
+        # mirrors pytest's own runner.py (SetupState).
+        for node in list(session._setupstate.stack):  # pyright: ignore[reportPrivateUsage]
             if node not in needed:
-                fins_list, exc_info = session._setupstate.stack[node]
+                fins_list, exc_info = session._setupstate.stack[node]  # pyright: ignore[reportPrivateUsage]
                 saved.append((node, list(fins_list)))
                 fins_list.clear()
         return saved

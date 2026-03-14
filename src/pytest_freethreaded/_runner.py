@@ -31,7 +31,10 @@ class _LiveReporter:
     def __init__(self, session, items):
         tr = session.config.pluginmanager.get_plugin("terminalreporter")
         self._tr = tr
-        self._tw = tr._tw if tr else None
+        # noinspection PyProtectedMember
+        # No public accessor for TerminalWriter; needed for hasmarkup,
+        # raw file handle (ANSI cursor movement), and write suppression.
+        self._tw = tr._tw if tr else None  # pyright: ignore[reportPrivateUsage]
         self._total = len(items)
         self._reported = 0
         self._startpath = session.config.rootpath
@@ -62,6 +65,11 @@ class _LiveReporter:
             and session.config.get_verbosity() <= 0
         )
         self._width = getattr(self._tw, "fullwidth", 80) if self._tw else 80
+        # noinspection PyProtectedMember
+        # No public accessor on TerminalWriter for the underlying file handle.
+        # We need it for direct ANSI escape writes (cursor movement, colors)
+        # that bypass TerminalWriter formatting.
+        self._file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
 
     @property
     def live(self):
@@ -89,7 +97,7 @@ class _LiveReporter:
         """Print all collected file lines with dim scheduled dots and a progress line."""
         if not self._live:
             return
-        f = self._tw._file
+        f = self._file
         for fspath in self._file_order:
             self._write_line_live(fspath)
             f.write("\n")
@@ -126,17 +134,20 @@ class _LiveReporter:
         """Reset terminal reporter state after live output."""
         if self._live and self._tw:
             # Finalize the progress line and move to the next line
-            self._tw._file.write("\n")
-            self._tw._file.flush()
+            self._file.write("\n")
+            self._file.flush()
         if self._tr:
             self._tr.currentfspath = None
-            self._tr._write_progress_information_filling_space = lambda: None
+            # noinspection PyProtectedMember
+            # No public API to suppress the final "[100%]" that the terminal
+            # reporter's pytest_runtestloop wrapper writes after the test loop.
+            self._tr._write_progress_information_filling_space = lambda: None  # pyright: ignore[reportPrivateUsage]
 
     # -- internals ------------------------------------------------------------
 
     def _update_file_line(self, fspath):
         """Rewrite a single file line and progress using cursor movement (live mode)."""
-        f = self._tw._file
+        f = self._file
         idx = self._file_idx[fspath]
         bottom = len(self._file_order)
         lines_up = bottom - idx
@@ -157,7 +168,7 @@ class _LiveReporter:
 
     def _write_line_live(self, fspath):
         """Write a file line with ANSI formatting (live terminal mode)."""
-        f = self._tw._file
+        f = self._file
         rel = self._rel_path(fspath)
 
         f.write("\r\033[K")
@@ -177,7 +188,7 @@ class _LiveReporter:
 
     def _write_line_plain(self, fspath):
         """Write a file line without ANSI codes (dumb/pipe mode)."""
-        f = self._tw._file
+        f = self._file
         rel = self._rel_path(fspath)
         progress = f" [{100 * self._reported // self._total:3d}%]"
 
@@ -192,7 +203,7 @@ class _LiveReporter:
 
     def _write_progress_line(self):
         """Write/update the progress line at the bottom."""
-        f = self._tw._file
+        f = self._file
         pct = 100 * self._reported // self._total
         f.write(f"\r\033[K{self._reported}/{self._total} [{pct:3d}%]")
 
@@ -273,8 +284,11 @@ class ParallelRunner:
         ihook = item.ihook
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
 
-        if hasattr(item, "_request") and not item._request:
-            item._initrequest()
+        # noinspection PyProtectedMember
+        # No public API for request lifecycle management; mirrors pytest's
+        # own runner.py (_pytest.runner.runtestprotocol).
+        if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
+            item._initrequest()  # pyright: ignore[reportPrivateUsage]
 
         rep_setup = call_and_report(item, "setup", log=True)
         if rep_setup.passed:
@@ -285,7 +299,7 @@ class ParallelRunner:
         call_and_report(item, "teardown", log=True, nextitem=nextitem)
 
         if hasattr(item, "_request"):
-            item._request = False
+            item._request = False  # pyright: ignore[reportPrivateUsage]
             item.funcargs = None
 
         ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
@@ -305,16 +319,20 @@ class ParallelRunner:
         saved_collector_fins = []
 
         # Phase 1: sequential setup (silent)
+        # noinspection PyProtectedMember
+        # item._request/_initrequest and session._setupstate: no public API
+        # for request lifecycle or setup state management.  Mirrors pytest's
+        # own runner.py (_pytest.runner.runtestprotocol / SetupState).
         for item in items:
-            if hasattr(item, "_request") and not item._request:
-                item._initrequest()
+            if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]
 
             needed = set(item.listchain())
-            if any(node not in needed for node in session._setupstate.stack):
+            if any(node not in needed for node in session._setupstate.stack):  # pyright: ignore[reportPrivateUsage]
                 saved_collector_fins.extend(
                     FixtureManager.save_collector_finalizers(session, item)
                 )
-                session._setupstate.teardown_exact(nextitem=item)
+                session._setupstate.teardown_exact(nextitem=item)  # pyright: ignore[reportPrivateUsage]
 
             rep = call_and_report(item, "setup", log=False)
             setup_reports[item] = rep
@@ -325,8 +343,8 @@ class ParallelRunner:
                     FixtureManager.save_and_clear_function_fixtures(item)
                 )
 
-            if item in session._setupstate.stack:
-                session._setupstate.stack.pop(item)
+            if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
+                session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
 
         if session.config.getoption("setuponly", False):
             for item in items:
@@ -438,15 +456,17 @@ class ParallelRunner:
             rep = item.ihook.pytest_runtest_makereport(item=item, call=teardown_info)
             item.ihook.pytest_runtest_logreport(report=rep)
 
+            # noinspection PyProtectedMember
             if hasattr(item, "_request"):
-                item._request = False
+                item._request = False  # pyright: ignore[reportPrivateUsage]
                 item.funcargs = None
 
             item.ihook.pytest_runtest_logfinish(
                 nodeid=item.nodeid, location=item.location
             )
 
-        session._setupstate.teardown_exact(nextitem=None)
+        # noinspection PyProtectedMember
+        session._setupstate.teardown_exact(nextitem=None)  # pyright: ignore[reportPrivateUsage]
 
         exceptions = []
         for node, fins in reversed(saved_collector_fins):
