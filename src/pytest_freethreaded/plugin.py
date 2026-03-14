@@ -1,6 +1,7 @@
 """pytest plugin hooks -- wiring only, delegates to classes."""
 
 import os
+import sys
 
 import pytest
 
@@ -58,6 +59,11 @@ def pytest_runtestloop(session):
     nthreads = _thread_count(session.config)
     if nthreads is None:
         return None
+    if not _is_free_threaded():
+        raise pytest.UsageError(
+            "--freethreaded requires a free-threaded Python build "
+            "(e.g. python3.13t or python3.14t with PYTHON_GIL=0)"
+        )
     runner = ParallelRunner(session, nthreads)
     return runner.run_all()
 
@@ -69,3 +75,11 @@ def _thread_count(config) -> int | None:
     if val == "auto":
         return os.cpu_count() or 4
     return int(val)
+
+
+def _is_free_threaded() -> bool:
+    """Check if running on a free-threaded Python build with the GIL disabled."""
+    is_gil_enabled = getattr(sys, "_is_gil_enabled", None)
+    if is_gil_enabled is None:
+        return False  # Python < 3.13, no free-threading support
+    return not is_gil_enabled()

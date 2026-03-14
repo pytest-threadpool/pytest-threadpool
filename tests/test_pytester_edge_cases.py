@@ -1,4 +1,23 @@
 """Tests for error and edge-case scenarios during parallel execution."""
+import shutil
+
+from tests.conftest import CASES_DIR
+
+
+class TestFreethreadedValidation:
+    """Verify the plugin rejects --freethreaded on GIL-enabled Python."""
+
+    def test_rejects_gil_enabled_python(self, ftdir):
+        """--freethreaded must error when running on a GIL-enabled build."""
+        ftdir.copy_case("validate_freethreaded")
+        # Copy the conftest that fakes sys._is_gil_enabled = True
+        shutil.copy2(
+            CASES_DIR / "validate_freethreaded_conftest.py",
+            ftdir.path / "conftest.py",
+        )
+        result = ftdir.run_pytest("--freethreaded", "2")
+        assert result.returncode != 0
+        assert "free-threaded Python build" in result.stderr or "free-threaded Python build" in result.stdout
 
 
 class TestSetupFailures:
