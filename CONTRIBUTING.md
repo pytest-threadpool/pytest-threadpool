@@ -55,17 +55,21 @@ _barrier = threading.Barrier(3, timeout=10)
 State should be created and accessed at the point of use. Importing a module
 should not trigger construction of barriers, connections, or other resources.
 
-### Parallelism tests use pytester
+### Parallelism tests use `ftdir` fixture
 
 Tests that verify parallel execution (barriers, concurrent writes, thread counts)
-must use the `pytester` fixture and `runpytest_subprocess`. This ensures each test
-spawns an isolated subprocess with the correct `--freethreaded` flag, so tests
-are self-contained and pass regardless of how the outer runner is invoked.
+must use the `ftdir` fixture (defined in `conftest.py`) and `run_pytest`. Unlike
+`pytester`, `ftdir` is thread-safe — it uses `tmp_path` instead of `os.chdir()`,
+so tests can run in parallel via `--freethreaded` on the outer suite itself.
+
+Each test writes files into its own `tmp_path` directory and runs pytest as a
+subprocess with the exact thread count needed. Use explicit thread counts for
+barrier-based tests (not `auto`) to avoid deadlocks on low-core machines.
 
 ```python
-# Good — isolated subprocess
-def test_children_run_concurrently(self, pytester):
-    pytester.makepyfile("""
+# Good — isolated subprocess via ftdir, explicit thread count
+def test_children_run_concurrently(self, ftdir):
+    ftdir.makepyfile("""
         import threading, pytest
         @pytest.mark.parallelizable("children")
         class TestBarrier:
@@ -73,7 +77,7 @@ def test_children_run_concurrently(self, pytester):
             def test_a(self): self.barrier.wait()
             def test_b(self): self.barrier.wait()
     """)
-    result = pytester.runpytest_subprocess("--freethreaded", "auto")
+    result = ftdir.run_pytest("--freethreaded", "2")
     result.assert_outcomes(passed=2)
 
 # Bad — depends on outer runner flags
@@ -110,6 +114,9 @@ src/pytest_freethreaded/
 ## Running tests
 
 ```bash
-# Run all tests (pytester tests spawn their own subprocesses)
+# Run all tests in parallel (each test spawns its own subprocess)
+pytest --freethreaded auto
+
+# Run sequentially
 pytest -v
 ```
