@@ -126,17 +126,37 @@ class ParallelRunner:
             self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
             return
 
-        # Phase 2: parallel calls
+        # Phase 2: parallel calls with immediate reporting
         callable_items = [it for it in items if setup_passed.get(it)]
         workers = min(self._nthreads, len(callable_items)) if callable_items else 1
 
         call_results = {}
+        reported = set()
 
         def _do_call(test_item):
             call_info = CallInfo.from_call(
                 lambda: test_item.runtest(), when="call"
             )
             return test_item, call_info
+
+        def _report_item(item):
+            """Report setup + call for a single item (must be called from
+            the main thread so terminal output stays ordered)."""
+            ihook = item.ihook
+            ihook.pytest_runtest_logstart(
+                nodeid=item.nodeid, location=item.location
+            )
+            ihook.pytest_runtest_logreport(report=setup_reports[item])
+            if setup_passed[item]:
+                if session.config.getoption("setupshow", False):
+                    show_test_item(item)
+                if item in call_results:
+                    call_info = call_results[item]
+                    rep = ihook.pytest_runtest_makereport(
+                        item=item, call=call_info
+                    )
+                    ihook.pytest_runtest_logreport(report=rep)
+            reported.add(item)
 
         if workers > 1 and len(callable_items) > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -155,24 +175,24 @@ class ParallelRunner:
                     else:
                         item, call_info = future.result()
                         call_results[item] = call_info
+                    # Report this item and any preceding items that are
+                    # already done, preserving original order for file
+                    # attribution.
+                    for it in items:
+                        if it in reported:
+                            continue
+                        if it not in call_results and setup_passed.get(it):
+                            break
+                        _report_item(it)
         else:
             for item in callable_items:
                 _, call_info = _do_call(item)
                 call_results[item] = call_info
 
-        # Phase 3: report setup + call results per item
+        # Phase 3: report any remaining items (setup failures, stragglers)
         for item in items:
-            ihook = item.ihook
-            ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
-            ihook.pytest_runtest_logreport(report=setup_reports[item])
-
-            if setup_passed[item]:
-                if session.config.getoption("setupshow", False):
-                    show_test_item(item)
-                if item in call_results:
-                    call_info = call_results[item]
-                    rep = ihook.pytest_runtest_makereport(item=item, call=call_info)
-                    ihook.pytest_runtest_logreport(report=rep)
+            if item not in reported:
+                _report_item(item)
 
         # Phase 4: teardown
         self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)

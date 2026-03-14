@@ -47,9 +47,8 @@ class FreethreadedTestDir:
 
     def makepyfile(self, source, name="test_file"):
         """Write a .py file into the test directory."""
-        p = self.path / f"{name}.py"
-        # textwrap.dedent-like: strip common leading whitespace
         import textwrap
+        p = self.path / f"{name}.py"
         p.write_text(textwrap.dedent(source))
         return p
 

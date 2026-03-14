@@ -54,6 +54,7 @@ class TestSequentialExecution:
                 assert names == ["a", "b", "c"]
                 threads = {t for _, t in _State.execution_log}
                 assert len(threads) == 1
-        """)
+            """
+        )
         result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
