@@ -5,10 +5,6 @@ Parallel test execution for free-threaded Python builds (3.13t+).
 Runs test *bodies* concurrently in a `ThreadPoolExecutor` while keeping
 fixture setup/teardown sequential (pytest internals are not thread-safe).
 
-> **Note:** Python 3.14t ships with the GIL disabled by default —
-> `PYTHON_GIL=0` is only needed on 3.13t. We recommend using 3.14t+
-> for the best free-threaded experience.
-
 ## Installation
 
 ```bash
@@ -18,11 +14,7 @@ pip install pytest-freethreaded
 ## Quick start
 
 ```bash
-# Python 3.14t (GIL off by default)
 pytest --freethreaded auto
-
-# Python 3.13t (must disable GIL explicitly)
-PYTHON_GIL=0 pytest --freethreaded auto
 ```
 
 Mark tests for parallel execution:
@@ -67,6 +59,53 @@ package (`__init__.py` `pytestmark`) level. Priority (most specific wins):
 ```
 not_parallelizable > own marker > class > module > package
 ```
+
+## Shared state between tests
+
+Unlike `pytest-xdist`, which uses subprocesses and requires all test data to
+be pickleable, `pytest-freethreaded` runs tests in threads within a **single
+process**. This means tests can share common non-pickleable, thread-safe
+objects — both within a parallel group and across sequential groups:
+
+```python
+import threading
+import pytest
+
+
+class SharedState:
+    lock = threading.Lock()          # not pickleable
+    event = threading.Event()        # not pickleable
+    results = {}
+
+
+@pytest.mark.parallelizable("children")
+class TestGroupA:
+    def test_a1(self):
+        with SharedState.lock:
+            SharedState.results["a1"] = True
+
+    def test_a2(self):
+        with SharedState.lock:
+            SharedState.results["a2"] = True
+
+
+@pytest.mark.parallelizable("children")
+class TestGroupB:
+    def test_b1(self):
+        SharedState.event.set()
+        with SharedState.lock:
+            SharedState.results["b1"] = True
+
+    def test_b2(self):
+        assert SharedState.event.wait(timeout=10)
+        with SharedState.lock:
+            SharedState.results["b2"] = True
+```
+
+Objects like `threading.Lock`, `threading.Event`, `logging.Logger`, database
+connections, and other non-pickleable resources can live as class attributes
+and be accessed freely from any test — parallel or sequential — without
+serialization overhead or workarounds.
 
 ## Usage
 
