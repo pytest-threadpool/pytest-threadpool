@@ -49,3 +49,15 @@ class TestParallelScopes:
         ftdir.copy_case("scope_module_children")
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
+
+    def test_dynamic_parametrize(self, ftdir):
+        """pytest_generate_tests parametrize runs concurrently with 'parameters' scope."""
+        ftdir.copy_case("scope_dynamic_parametrize")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        result.assert_outcomes(passed=3)
+
+    def test_all_not_parallelizable_runs_sequential(self, ftdir):
+        """All items with @not_parallelizable run on MainThread, no thread pool."""
+        ftdir.copy_case("scope_all_not_parallelizable")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        result.assert_outcomes(passed=4)

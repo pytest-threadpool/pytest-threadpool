@@ -127,10 +127,16 @@ class MarkerResolver:
         if not callspec or not callspec.params:
             return ()
         parametrize_names = MarkerResolver.parametrize_argnames(item)
+        # noinspection PyProtectedMember
+        # callspec._arg2scope: no public API; needed to identify
+        # function-scoped params from pytest_generate_tests (which
+        # don't produce parametrize markers visible to iter_markers).
+        arg2scope = getattr(callspec, "_arg2scope", {})
         fixture_params = {
             k: v
             for k, v in callspec.params.items()
             if k not in parametrize_names
+            and arg2scope.get(k, Scope.Function) is not Scope.Function
         }
         return tuple(sorted(fixture_params.items())) if fixture_params else ()
 
