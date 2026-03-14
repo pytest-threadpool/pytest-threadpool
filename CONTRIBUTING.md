@@ -118,6 +118,41 @@ scripts/
     setup-dev         # One-command dev environment setup
 ```
 
+## Commit message style
+
+Every commit message starts with one or more tags in brackets:
+
+```
+[Tag] Short description
+```
+
+### Tags
+
+| Tag | Scope |
+|-----|-------|
+| `[Runner]` | Core parallel execution engine (`_runner.py`, `_fixtures.py`) |
+| `[Markers]` | Marker resolution and grouping (`_markers.py`, `_grouping.py`, `_constants.py`) |
+| `[Report]` | Terminal reporting and display (`_LiveReporter`) |
+| `[Plugin]` | Plugin hooks and CLI options (`plugin.py`) |
+| `[API]` | Public API changes (`_api.py`, `__init__.py`) |
+| `[Test]` | Test additions or changes only |
+| `[Tooling]` | Ruff, pyright, pre-commit, CI, scripts |
+| `[Docs]` | README, CONTRIBUTING, docstrings |
+| `[Refactor]` | Internal restructuring, no behavior change |
+| `[Fix]` | Bug fix — must include issue number if fixing a known issue |
+
+### Combining tags
+
+Tags can be combined. The fix tag always comes first and includes the issue
+number when one exists:
+
+```
+[Fix #42][Runner] Prevent deadlock when setup fails mid-group
+[Fix][Report] Correct progress count after skipped tests
+[Test][Markers] Add coverage for nested package marker inheritance
+[Tooling] Add ruff PIE and RET rule sets
+```
+
 ## Running tests
 
 ```bash
