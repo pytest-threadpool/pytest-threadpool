@@ -1,9 +1,9 @@
 """Parallel test runner orchestration."""
 
 import os
+import queue
 import threading
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from _pytest.runner import CallInfo, call_and_report, show_test_item
 
@@ -408,29 +408,52 @@ class ParallelRunner:
 
             reported.add(item)
 
+        interrupted = False
         if workers > 1 and len(callable_items) > 1:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(_do_call, item): item for item in callable_items
-                }
-                for future in as_completed(futures):
-                    exc = future.exception()
-                    if exc is not None:
-                        item = futures[future]
-                        call_info = CallInfo.from_call(
-                            lambda e=exc: (_ for _ in ()).throw(e),
-                            when="call",
-                        )
-                        call_results[item] = call_info
-                    else:
-                        item, call_info = future.result()
-                        call_results[item] = call_info
+            work_queue = queue.SimpleQueue()
+            result_queue = queue.SimpleQueue()
+
+            def _pool_worker():
+                while True:
+                    work_item = work_queue.get()
+                    if work_item is None:
+                        return
+                    result = _do_call(work_item)
+                    result_queue.put(result)
+
+            threads = []
+            for _ in range(workers):
+                t = threading.Thread(target=_pool_worker, daemon=True)
+                t.start()
+                threads.append(t)
+
+            for ci in callable_items:
+                work_queue.put(ci)
+
+            try:
+                remaining = len(callable_items)
+                while remaining > 0:
+                    item, call_info = result_queue.get()
+                    call_results[item] = call_info
                     _report_item(item)
+                    remaining -= 1
+            except KeyboardInterrupt:
+                interrupted = True
+
+            # Signal workers to stop (best-effort; they're daemon threads)
+            for _ in range(workers):
+                work_queue.put(None)
+            if not interrupted:
+                for t in threads:
+                    t.join()
         else:
-            for item in callable_items:
-                _, call_info = _do_call(item)
-                call_results[item] = call_info
-                _report_item(item)
+            try:
+                for item in callable_items:
+                    _, call_info = _do_call(item)
+                    call_results[item] = call_info
+                    _report_item(item)
+            except KeyboardInterrupt:
+                interrupted = True
 
         # Phase 3: report any remaining items (setup failures, stragglers)
         for item in items:
@@ -439,8 +462,11 @@ class ParallelRunner:
 
         live.finish()
 
-        # Phase 4: teardown
+        # Phase 4: teardown (always runs, even after interrupt)
         self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
+
+        if interrupted:
+            raise KeyboardInterrupt()
 
     def _teardown_all(self, items, per_item_fixture_fins, saved_collector_fins) -> None:
         """Run per-item function-level finalizers, saved collector finalizers,

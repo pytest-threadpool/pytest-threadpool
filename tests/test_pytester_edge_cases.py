@@ -1,5 +1,10 @@
 """Tests for error and edge-case scenarios during parallel execution."""
+import os
+import signal
+import subprocess
+import sys
 import shutil
+import time
 
 from tests.conftest import CASES_DIR
 
@@ -64,3 +69,30 @@ class TestConcurrencyEdgeCases:
         ftdir.copy_case("edge_nested_threads")
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=4)
+
+    def test_sigint_exits_promptly(self, ftdir):
+        """SIGINT during parallel execution cancels futures and exits promptly."""
+        ftdir.copy_case("edge_sigint")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "pytest", str(ftdir.path),
+             "--freethreaded", "3", "-v"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(ftdir.path),
+        )
+        # Wait briefly for tests to start running, then send SIGINT
+        time.sleep(1)
+        proc.send_signal(signal.SIGINT)
+        # Must exit within a few seconds, not 30s
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise AssertionError(
+                "Process did not exit within 10s after SIGINT — "
+                "futures were not cancelled promptly"
+            )
+        assert proc.returncode != 0
+        assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
