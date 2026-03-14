@@ -1,5 +1,7 @@
 """Conftest for pytest-freethreaded plugin tests."""
 
+import os
+import select
 import shutil
 import subprocess
 import sys
@@ -74,7 +76,7 @@ class FreethreadedTestDir:
         return d
 
     def run_pytest(self, *extra_args, timeout=30):
-        """Run pytest in a subprocess against this directory."""
+        """Run pytest in a subprocess (piped, non-TTY)."""
         args = [
             sys.executable, "-m", "pytest",
             str(self.path),
@@ -89,6 +91,54 @@ class FreethreadedTestDir:
             cwd=str(self.path),
         )
         return RunResult(result.stdout, result.stderr, result.returncode)
+
+    def run_pytest_tty(self, *extra_args, timeout=30):
+        """Run pytest in a PTY so the child sees a real terminal.
+
+        Returns a RunResult whose stdout contains ANSI escape sequences
+        exactly as a user would see them.
+        """
+        import pty
+
+        args = [
+            sys.executable, "-m", "pytest",
+            str(self.path),
+            "--basetemp", str(self.path / ".tmp"),
+            *extra_args,
+        ]
+        master_fd, slave_fd = pty.openpty()
+        env = os.environ.copy()
+        env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "120"
+        proc = subprocess.Popen(
+            args,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(self.path),
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        chunks = []
+        while True:
+            try:
+                ready, _, _ = select.select([master_fd], [], [], timeout)
+                if not ready:
+                    proc.kill()
+                    break
+                data = os.read(master_fd, 4096)
+                if not data:
+                    break
+                chunks.append(data)
+            except OSError:
+                break
+        os.close(master_fd)
+        proc.wait(timeout=5)
+
+        raw = b"".join(chunks).decode("utf-8", errors="replace")
+        return RunResult(raw, "", proc.returncode)
 
 
 @pytest.fixture

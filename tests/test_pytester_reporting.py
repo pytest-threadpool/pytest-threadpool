@@ -13,6 +13,25 @@ from tests.cases import reporting_package_children as pkg_children
 
 CASES_DIR = Path(__file__).parent / "cases"
 
+MULTI_FILE_INIT = (
+    "import pytest\n"
+    'pytestmark = pytest.mark.parallelizable("children")\n'
+)
+MULTI_FILE_A = (
+    "def test_a1():\n"
+    "    pass\n"
+    "\n"
+    "def test_a2():\n"
+    "    pass\n"
+)
+MULTI_FILE_B = (
+    "def test_b1():\n"
+    "    pass\n"
+    "\n"
+    "def test_b2():\n"
+    "    pass\n"
+)
+
 
 class TestReporting:
     """Verify that test results are reported correctly with --freethreaded."""
@@ -168,3 +187,168 @@ class TestReporting:
             f"Expected test_case.py on exactly 1 line, got {len(dot_lines)}: "
             f"{dot_lines}\nstdout:\n{result.stdout}"
         )
+
+
+def _setup_multi_file_pkg(ftdir):
+    """Create a two-module package for output mode tests."""
+    pkg = ftdir.mkdir("mpkg")
+    pkg.joinpath("__init__.py").write_text(MULTI_FILE_INIT)
+    pkg.joinpath("test_a.py").write_text(MULTI_FILE_A)
+    pkg.joinpath("test_b.py").write_text(MULTI_FILE_B)
+
+
+def _render_terminal(raw):
+    """Replay raw PTY output into final visible screen lines.
+
+    Handles \\n (newline), \\r (carriage return), ESC[nA (cursor up),
+    ESC[nB (cursor down), ESC[K (erase to EOL), and strips other
+    ANSI CSI/OSC sequences.
+    """
+    # Split into tokens: ANSI sequences, \r, \n, or plain text
+    tokens = re.findall(r"\033\[[^a-zA-Z]*[a-zA-Z]|\033\][^\x07]*\x07|\r|\n|[^\033\r\n]+", raw)
+
+    lines = [""]
+    row = 0
+
+    for tok in tokens:
+        if tok == "\n":
+            row += 1
+            while row >= len(lines):
+                lines.append("")
+        elif tok == "\r":
+            pass  # carriage return — next write overwrites from col 0
+        elif tok.startswith("\033[") and tok.endswith("A"):
+            # cursor up
+            n = int(tok[2:-1]) if tok[2:-1] else 1
+            row = max(0, row - n)
+        elif tok.startswith("\033[") and tok.endswith("B"):
+            # cursor down
+            n = int(tok[2:-1]) if tok[2:-1] else 1
+            row += n
+            while row >= len(lines):
+                lines.append("")
+        elif tok.startswith("\033[") and tok.endswith("K"):
+            # erase to end of line
+            lines[row] = ""
+        elif tok.startswith("\033"):
+            pass  # ignore other escapes
+        else:
+            # plain text — overwrite current line from start
+            # (we always \r\033[K before writing, so line is cleared)
+            lines[row] = lines[row] + tok
+
+    return [l for l in lines if l.strip()]
+
+
+def _strip_ansi(text):
+    """Remove ANSI escape sequences from text."""
+    text = re.sub(r"\033\[[^a-zA-Z]*[a-zA-Z]", "", text)
+    text = re.sub(r"\033\][^\x07]*\x07", "", text)
+    return text
+
+
+# Regex matching a result line: "path/to/test.py .." with result letters
+_RESULT_LINE_RE = re.compile(r"test_[ab]\.py\s+[.Fs]+")
+
+
+class TestDumbMode:
+    """Verify output in dumb/pipe mode (non-TTY subprocess)."""
+
+    def test_one_line_per_file(self, ftdir):
+        """Each file appears exactly once — no duplicates."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        a_lines = [
+            l for l in result.outlines
+            if re.search(r"test_a\.py\s+[.Fs]+", l)
+        ]
+        b_lines = [
+            l for l in result.outlines
+            if re.search(r"test_b\.py\s+[.Fs]+", l)
+        ]
+        assert len(a_lines) == 1, (
+            f"Expected test_a.py on 1 result line, got {len(a_lines)}: "
+            f"{a_lines}\nstdout:\n{result.stdout}"
+        )
+        assert len(b_lines) == 1, (
+            f"Expected test_b.py on 1 result line, got {len(b_lines)}: "
+            f"{b_lines}\nstdout:\n{result.stdout}"
+        )
+
+    def test_no_ansi_escapes(self, ftdir):
+        """Dumb mode output contains no ANSI escape sequences."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        ansi_lines = [
+            l for l in result.outlines if re.search(r"\033[\[\]]", l)
+        ]
+        assert not ansi_lines, (
+            f"ANSI escapes found in dumb mode output:\n"
+            + "\n".join(ansi_lines)
+        )
+
+    def test_progress_on_file_lines(self, ftdir):
+        """Each file line includes a progress percentage."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        file_lines = [
+            l for l in result.outlines if _RESULT_LINE_RE.search(l)
+        ]
+        assert len(file_lines) == 2, (
+            f"Expected 2 result lines, got {len(file_lines)}: "
+            f"{file_lines}\nstdout:\n{result.stdout}"
+        )
+        for line in file_lines:
+            assert re.search(r"\[\s*\d+%\]", line), (
+                f"Missing progress on file line: {line!r}"
+            )
+
+
+class TestLiveMode:
+    """Verify output in live/TTY mode (PTY subprocess)."""
+
+    def test_contains_ansi_cursor_movement(self, ftdir):
+        """Live mode uses ANSI cursor-up sequences for in-place updates."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        # Cursor-up escape: ESC[nA
+        assert re.search(r"\033\[\d+A", result.stdout), (
+            f"No cursor-up ANSI sequences in live mode output.\n"
+            f"stdout:\n{result.stdout!r}"
+        )
+
+    def test_progress_line_at_end(self, ftdir):
+        """Live mode has a single progress summary line (N/N [100%])."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        screen = _render_terminal(result.stdout)
+        progress_lines = [
+            l for l in screen if re.search(r"4/4\s*\[\s*100%\]", l)
+        ]
+        assert progress_lines, (
+            f"No '4/4 [100%]' progress line found.\n"
+            f"screen:\n" + "\n".join(screen)
+        )
+
+    def test_file_lines_no_per_line_progress(self, ftdir):
+        """File lines in live mode do not have individual percentages."""
+        _setup_multi_file_pkg(ftdir)
+        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result.assert_outcomes(passed=4)
+
+        screen = _render_terminal(result.stdout)
+        for line in screen:
+            if _RESULT_LINE_RE.search(line):
+                assert not re.search(r"\[\s*\d+%\]", line), (
+                    f"File line has per-line progress: {line!r}"
+                )
