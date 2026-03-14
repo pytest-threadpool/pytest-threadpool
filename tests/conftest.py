@@ -1,10 +1,14 @@
 """Conftest for pytest-freethreaded plugin tests."""
 
+import shutil
 import subprocess
 import sys
 import re
+from pathlib import Path
 
 import pytest
+
+CASES_DIR = Path(__file__).parent / "cases"
 
 
 class RunResult:
@@ -44,6 +48,16 @@ class FreethreadedTestDir:
 
     def __init__(self, path):
         self.path = path
+
+    def copy_case(self, case_name):
+        """Copy a case file from tests/cases/ into the test directory.
+
+        The case file is renamed to test_case.py so pytest collects it.
+        """
+        src = CASES_DIR / f"{case_name}.py"
+        dst = self.path / "test_case.py"
+        shutil.copy2(src, dst)
+        return dst
 
     def makepyfile(self, source, name="test_file"):
         """Write a .py file into the test directory."""

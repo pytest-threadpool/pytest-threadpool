@@ -2,7 +2,10 @@
 
 import pytest
 
+from tests.cases._templates import sequential_order_class
 
+
+@pytest.mark.parallelizable("children")
 class TestPackageLevelParallel:
     """Verify package pytestmark propagation across modules and subpackages."""
 
@@ -119,22 +122,12 @@ class TestPackageLevelParallel:
             'pytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("test_seq.py").write_text(
-            "import time\n"
             "import pytest\n"
             "\n"
-            "@pytest.mark.not_parallelizable\n"
-            "class TestSeq:\n"
-            "    order = []\n"
-            "\n"
-            "    def test_a(self):\n"
-            "        time.sleep(0.05)\n"
-            "        self.order.append('a')\n"
-            "\n"
-            "    def test_b(self):\n"
-            "        self.order.append('b')\n"
-            "\n"
-            "    def test_verify(self):\n"
-            "        assert self.order == ['a', 'b']\n"
+            + sequential_order_class(
+                "TestSeq",
+                decorator="@pytest.mark.not_parallelizable",
+            )
         )
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
@@ -147,23 +140,11 @@ class TestPackageLevelParallel:
             'pytestmark = pytest.mark.parallelizable("children")\n'
         )
         pkg.joinpath("test_override.py").write_text(
-            "import time\n"
             "import pytest\n"
             "\n"
             'pytestmark = pytest.mark.parallelizable("parameters")\n'
             "\n"
-            "class TestModOverride:\n"
-            "    order = []\n"
-            "\n"
-            "    def test_a(self):\n"
-            "        time.sleep(0.05)\n"
-            "        self.order.append('a')\n"
-            "\n"
-            "    def test_b(self):\n"
-            "        self.order.append('b')\n"
-            "\n"
-            "    def test_verify(self):\n"
-            "        assert self.order == ['a', 'b']\n"
+            + sequential_order_class("TestModOverride")
         )
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
@@ -182,35 +163,13 @@ class TestPackageLevelParallel:
             'pytestmark = pytest.mark.parallelizable("parameters")\n'
         )
         sub.joinpath("test_sub.py").write_text(
-            "import time\n"
-            "\n"
-            "class TestSubOverride:\n"
-            "    order = []\n"
-            "\n"
-            "    def test_a(self):\n"
-            "        time.sleep(0.05)\n"
-            "        self.order.append('a')\n"
-            "\n"
-            "    def test_b(self):\n"
-            "        self.order.append('b')\n"
-            "\n"
-            "    def test_verify(self):\n"
-            "        assert self.order == ['a', 'b']\n"
+            sequential_order_class("TestSubOverride")
         )
         result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
     def test_parallel_only_skips_without_flag(self, ftdir):
         """parallel_only marker skips tests when --freethreaded is not passed."""
-        ftdir.makepyfile("""
-            import pytest
-
-            @pytest.mark.parallel_only
-            def test_needs_threads():
-                pass
-
-            def test_normal():
-                pass
-        """)
+        ftdir.copy_case("parallel_only_skip")
         result = ftdir.run_pytest()
         result.assert_outcomes(passed=1, skipped=1)

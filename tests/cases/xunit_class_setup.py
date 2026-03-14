@@ -1,0 +1,26 @@
+"""setup_class runs once before parallel methods."""
+import pytest
+
+
+@pytest.mark.parallelizable("children")
+class TestClassSetup:
+    log = []
+
+    @classmethod
+    def setup_class(cls):
+        cls.log.append("setup_class")
+
+    @classmethod
+    def teardown_class(cls):
+        cls.log.append("teardown_class")
+
+    def test_a(self):
+        assert "setup_class" in self.log
+
+    def test_b(self):
+        count = self.log.count("setup_class")
+        assert count == 1
+
+
+def test_verify():
+    assert TestClassSetup.log[0] == "setup_class"
