@@ -1,12 +1,14 @@
-"""Pytester tests for xunit-style setup/teardown under parallel execution."""
+"""Tests for xunit-style setup/teardown under parallel execution."""
+
+import pytest
 
 
 class TestXunitUnderParallel:
     """Verify xunit setup/teardown hooks work correctly with parallel children."""
 
-    def test_class_setup_teardown(self, pytester):
+    def test_class_setup_teardown(self, ftdir):
         """setup_class runs once before parallel methods."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -31,12 +33,12 @@ class TestXunitUnderParallel:
             def test_verify():
                 assert TestClassSetup.log[0] == "setup_class"
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
-    def test_method_setup_teardown(self, pytester):
+    def test_method_setup_teardown(self, ftdir):
         """setup_method runs per method even with parallel children."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -59,12 +61,12 @@ class TestXunitUnderParallel:
                 setups = [x for x in TestMethodSetup.log if x.startswith("setup_")]
                 assert len(setups) >= 3
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
 
-    def test_combined_class_and_method(self, pytester):
+    def test_combined_class_and_method(self, ftdir):
         """Both setup_class and setup_method work together."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -90,12 +92,12 @@ class TestXunitUnderParallel:
                                  if x.startswith("method_setup_")]
                 assert len(method_setups) >= 2
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
-    def test_module_setup_teardown(self, pytester):
+    def test_module_setup_teardown(self, ftdir):
         """Module-level setup_module / teardown_module work."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             class _State:
                 log = []
 
@@ -108,12 +110,12 @@ class TestXunitUnderParallel:
             def test_setup_ran():
                 assert "setup_module" in _State.log
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=1)
 
-    def test_function_setup_teardown(self, pytester):
+    def test_function_setup_teardown(self, ftdir):
         """Function-level setup_function / teardown_function work."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             class _State:
                 log = []
 
@@ -132,5 +134,5 @@ class TestXunitUnderParallel:
             def test_verify():
                 assert "teardown_test_alpha" in _State.log
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)

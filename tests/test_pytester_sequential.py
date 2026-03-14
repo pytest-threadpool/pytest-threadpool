@@ -1,12 +1,14 @@
-"""Pytester tests for sequential behavior when no parallel markers are used."""
+"""Tests for sequential behavior when no parallel markers are used."""
+
+import pytest
 
 
 class TestSequentialExecution:
     """Verify unmarked tests run sequentially even with --freethreaded."""
 
-    def test_unmarked_class_runs_sequentially(self, pytester):
+    def test_unmarked_class_runs_sequentially(self, ftdir):
         """Class without parallelizable marker preserves test order."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import time
 
             class TestUnmarked:
@@ -25,12 +27,12 @@ class TestSequentialExecution:
             def test_verify():
                 assert TestUnmarked.order == ["first", "second", "third"]
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
 
-    def test_bare_functions_run_sequentially(self, pytester):
+    def test_bare_functions_run_sequentially(self, ftdir):
         """Bare module functions run sequentially on one thread."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             from time import sleep
 
@@ -53,5 +55,5 @@ class TestSequentialExecution:
                 threads = {t for _, t in _State.execution_log}
                 assert len(threads) == 1
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)

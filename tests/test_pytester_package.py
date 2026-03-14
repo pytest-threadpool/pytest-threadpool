@@ -1,12 +1,14 @@
-"""Pytester tests for package-level marker inheritance and overrides."""
+"""Tests for package-level marker inheritance and overrides."""
+
+import pytest
 
 
 class TestPackageLevelParallel:
     """Verify package pytestmark propagation across modules and subpackages."""
 
-    def test_package_children_cross_module(self, pytester):
+    def test_package_children_cross_module(self, ftdir):
         """Package-level children batches tests from multiple modules together."""
-        pkg = pytester.mkdir("mypkg")
+        pkg = ftdir.mkdir("mypkg")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -36,12 +38,12 @@ class TestPackageLevelParallel:
             "def test_b2():\n"
             "    PkgState.barrier.wait()\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "4")
+        result = ftdir.run_pytest("--freethreaded", "4")
         result.assert_outcomes(passed=4)
 
-    def test_subpackage_inherits_parent(self, pytester):
+    def test_subpackage_inherits_parent(self, ftdir):
         """Subpackage without own marker inherits parent's children scope."""
-        pkg = pytester.mkdir("parent")
+        pkg = ftdir.mkdir("parent")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -70,14 +72,14 @@ class TestPackageLevelParallel:
             "def test_b1():\n"
             "    SubState.barrier.wait()\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_class_override_narrows_scope(self, pytester):
+    def test_class_override_narrows_scope(self, ftdir):
         """Class with own parameters overrides package children.
         The barrier(2) in the package batch would deadlock if
         the parametrized class joined it."""
-        pkg = pytester.mkdir("scopepkg")
+        pkg = ftdir.mkdir("scopepkg")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -106,12 +108,12 @@ class TestPackageLevelParallel:
             "    def test_verify(self):\n"
             "        assert set(self.param_log.keys()) == {0, 1, 2}\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "6")
+        result = ftdir.run_pytest("--freethreaded", "6")
         result.assert_outcomes(passed=6)
 
-    def test_not_parallelizable_overrides_package(self, pytester):
+    def test_not_parallelizable_overrides_package(self, ftdir):
         """@not_parallelizable class in a parallel package runs sequentially."""
-        pkg = pytester.mkdir("notpkg")
+        pkg = ftdir.mkdir("notpkg")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -134,12 +136,12 @@ class TestPackageLevelParallel:
             "    def test_verify(self):\n"
             "        assert self.order == ['a', 'b']\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_module_overrides_package(self, pytester):
+    def test_module_overrides_package(self, ftdir):
         """Module pytestmark overrides package marker."""
-        pkg = pytester.mkdir("modpkg")
+        pkg = ftdir.mkdir("modpkg")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -163,12 +165,12 @@ class TestPackageLevelParallel:
             "    def test_verify(self):\n"
             "        assert self.order == ['a', 'b']\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_subpackage_override(self, pytester):
+    def test_subpackage_override(self, ftdir):
         """Subpackage with own parameters overrides parent children."""
-        pkg = pytester.mkdir("outer")
+        pkg = ftdir.mkdir("outer")
         pkg.joinpath("__init__.py").write_text(
             "import pytest\n"
             'pytestmark = pytest.mark.parallelizable("children")\n'
@@ -195,12 +197,12 @@ class TestPackageLevelParallel:
             "    def test_verify(self):\n"
             "        assert self.order == ['a', 'b']\n"
         )
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_parallel_only_skips_without_flag(self, pytester):
+    def test_parallel_only_skips_without_flag(self, ftdir):
         """parallel_only marker skips tests when --freethreaded is not passed."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallel_only
@@ -210,5 +212,5 @@ class TestPackageLevelParallel:
             def test_normal():
                 pass
         """)
-        result = pytester.runpytest_subprocess()
+        result = ftdir.run_pytest()
         result.assert_outcomes(passed=1, skipped=1)

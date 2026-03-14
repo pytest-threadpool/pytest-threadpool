@@ -1,12 +1,14 @@
-"""Pytester tests for thread-safe shared state under parallel execution."""
+"""Tests for thread-safe shared state under parallel execution."""
+
+import pytest
 
 
 class TestSharedStateUnderParallel:
     """Verify thread-safe dict/counter operations with parallel children."""
 
-    def test_thread_safe_dict_mutation(self, pytester):
+    def test_thread_safe_dict_mutation(self, ftdir):
         """Concurrent dict writes from parallel methods are consistent."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -33,12 +35,12 @@ class TestSharedStateUnderParallel:
                         assert f"{prefix}_{i}" in d
                         assert d[f"{prefix}_{i}"] == base + i
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=4)
 
-    def test_lock_free_counter(self, pytester):
+    def test_lock_free_counter(self, ftdir):
         """Each thread counts independently, results are correct."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -64,12 +66,12 @@ class TestSharedStateUnderParallel:
                 for name in ("a", "b", "c"):
                     assert TestCounter.results[name] == 50_000
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=4)
 
-    def test_barrier_sync_proves_concurrency(self, pytester):
+    def test_barrier_sync_proves_concurrency(self, ftdir):
         """Two-phase barrier proves tests truly run concurrently."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -94,5 +96,5 @@ class TestSharedStateUnderParallel:
                 def test_c(self):
                     self._arrive("c")
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)

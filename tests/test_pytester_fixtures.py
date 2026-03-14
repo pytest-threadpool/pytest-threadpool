@@ -1,12 +1,14 @@
-"""Pytester tests for fixture correctness under parallel execution."""
+"""Tests for fixture correctness under parallel execution."""
+
+import pytest
 
 
 class TestFixturesUnderParallel:
     """Verify fixture setup/teardown behaves correctly with parallel children."""
 
-    def test_class_scoped_fixture_setup_once(self, pytester):
+    def test_class_scoped_fixture_setup_once(self, ftdir):
         """Class-scoped fixture runs exactly once despite parallel methods."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -32,12 +34,12 @@ class TestFixturesUnderParallel:
                     self.barrier.wait()
                     assert len(self.setup_count) == 1
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_class_scoped_yield_fixture(self, pytester):
+    def test_class_scoped_yield_fixture(self, ftdir):
         """Class-scoped yield fixture: setup before parallel, teardown after."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -59,12 +61,12 @@ class TestFixturesUnderParallel:
             def test_verify():
                 assert "setup" in TestYield.log
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
-    def test_function_scoped_fixture(self, pytester):
+    def test_function_scoped_fixture(self, ftdir):
         """Function-scoped fixtures get fresh values per test."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -90,12 +92,12 @@ class TestFixturesUnderParallel:
                 setups = [x for x in TestFuncScope.call_log if x.startswith("setup_")]
                 assert len(setups) == 3
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
 
-    def test_parameterized_fixture(self, pytester):
+    def test_parameterized_fixture(self, ftdir):
         """Parameterized class-scoped fixture expands correctly."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -110,12 +112,12 @@ class TestFixturesUnderParallel:
                 def test_in_set(self, variant):
                     assert variant in {"alpha", "beta"}
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
 
-    def test_multiple_fixture_scopes(self, pytester):
+    def test_multiple_fixture_scopes(self, ftdir):
         """Session + module + class fixtures compose correctly."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.fixture(scope="session")
@@ -137,12 +139,12 @@ class TestFixturesUnderParallel:
                 def test_both(self, session_res, module_res):
                     assert session_res and module_res
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
-    def test_yield_fixture_cleanup(self, pytester):
+    def test_yield_fixture_cleanup(self, ftdir):
         """Yield fixture teardown runs after all parallel methods."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -164,5 +166,5 @@ class TestFixturesUnderParallel:
             def test_verify():
                 assert TestCleanup.flag["cleaned"]
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)

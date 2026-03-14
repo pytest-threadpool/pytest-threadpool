@@ -1,12 +1,14 @@
-"""Pytester tests for parallel scope types and marker priority."""
+"""Tests for parallel scope types and marker priority."""
+
+import pytest
 
 
 class TestParallelScopes:
     """Verify parameters, all, children scopes and override priority."""
 
-    def test_parameters_scope(self, pytester):
+    def test_parameters_scope(self, ftdir):
         """Parametrized variants run concurrently with 'parameters' scope."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -18,12 +20,12 @@ class TestParallelScopes:
 
             test_param._barrier = threading.Barrier(3, timeout=10)
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)
 
-    def test_all_scope_merges_children_and_params(self, pytester):
+    def test_all_scope_merges_children_and_params(self, ftdir):
         """'all' merges plain methods and parametrized variants into one batch."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -41,12 +43,12 @@ class TestParallelScopes:
                 def test_plain_b(self):
                     self.barrier.wait()
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "5")
+        result = ftdir.run_pytest("--freethreaded", "5")
         result.assert_outcomes(passed=5)
 
-    def test_children_does_not_merge_params(self, pytester):
+    def test_children_does_not_merge_params(self, ftdir):
         """'children' keeps parametrized variants in separate groups."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import pytest
 
             @pytest.mark.parallelizable("children")
@@ -60,12 +62,12 @@ class TestParallelScopes:
             def test_verify():
                 assert set(TestChildren.results.keys()) == {"a", "b"}
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
-    def test_own_marker_overrides_class(self, pytester):
+    def test_own_marker_overrides_class(self, ftdir):
         """Method's own 'parameters' overrides class 'children'."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -88,12 +90,12 @@ class TestParallelScopes:
                 # If own param joined children batch, barrier(2) would deadlock
                 assert True
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "5")
+        result = ftdir.run_pytest("--freethreaded", "5")
         result.assert_outcomes(passed=6)
 
-    def test_not_parallelizable_overrides_class(self, pytester):
+    def test_not_parallelizable_overrides_class(self, ftdir):
         """@not_parallelizable on a method opts it out of class children batch."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import time
             import pytest
 
@@ -117,12 +119,12 @@ class TestParallelScopes:
                 assert "b" in TestMixed.log
                 assert "c" in TestMixed.log
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto")
+        result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=4)
 
-    def test_not_parallelizable_bare_function(self, pytester):
+    def test_not_parallelizable_bare_function(self, ftdir):
         """@not_parallelizable on bare functions in a parallel module."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import time
             import pytest
 
@@ -137,14 +139,14 @@ class TestParallelScopes:
             def test_seq_b():
                 print("ORDER:b")
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "auto", "-s")
+        result = ftdir.run_pytest("--freethreaded", "auto", "-s")
         result.assert_outcomes(passed=2)
         order = [l.split("ORDER:")[1] for l in result.outlines if "ORDER:" in l]
         assert order == ["a", "b"]
 
-    def test_module_level_children(self, pytester):
+    def test_module_level_children(self, ftdir):
         """Module-level pytestmark parallelizable('children') works."""
-        pytester.makepyfile("""
+        ftdir.makepyfile("""
             import threading
             import pytest
 
@@ -162,5 +164,5 @@ class TestParallelScopes:
             def test_c():
                 _State.barrier.wait()
         """)
-        result = pytester.runpytest_subprocess("--freethreaded", "3")
+        result = ftdir.run_pytest("--freethreaded", "3")
         result.assert_outcomes(passed=3)

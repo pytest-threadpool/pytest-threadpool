@@ -29,3 +29,4 @@ build-backend = "hatchling.build"
 packages = ["src/pytest_freethreaded"]
 
 [tool.pytest.ini_options]
+addopts = ["--freethreaded", "auto"]
