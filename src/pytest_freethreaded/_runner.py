@@ -1,6 +1,8 @@
 """Parallel test runner orchestration."""
 
 import os
+import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from _pytest.runner import CallInfo, call_and_report, show_test_item
@@ -8,27 +10,50 @@ from _pytest.runner import CallInfo, call_and_report, show_test_item
 from ._fixtures import FixtureManager
 from ._grouping import GroupKeyBuilder
 
+# Test slot states
+_SCHEDULED = "scheduled"
+_RUNNING = "running"
+_DONE = "done"
+
 
 class _LiveReporter:
     """Reports parallel results with live per-file line updates.
 
-    Each file gets one output line.  As tests complete, the cursor moves
-    back to the file's line, appends a dot, updates the progress, and
-    returns to the bottom.  Falls back to plain immediate reporting when
-    stdout is not a terminal.
+    Pre-prints all collected file lines before execution starts.
+    Each test slot shows one of three states:
+      - scheduled: dim dot (waiting to run)
+      - running:   bright spinning indicator
+      - done:      colored result letter (./F/s)
+
+    Falls back to plain immediate reporting when stdout is not a terminal.
     """
 
-    def __init__(self, session, total):
+    def __init__(self, session, items):
         tr = session.config.pluginmanager.get_plugin("terminalreporter")
         self._tr = tr
         self._tw = tr._tw if tr else None
-        self._total = total
+        self._total = len(items)
         self._reported = 0
         self._startpath = session.config.rootpath
-        # file tracking
-        self._file_order = []       # fspath in first-seen order
-        self._file_idx = {}         # fspath -> index in _file_order
-        self._file_letters = {}     # fspath -> list of (letter_str,)
+        self._lock = threading.Lock()
+
+        # Build file→items mapping in collection order
+        self._file_order = []
+        self._file_idx = {}
+        self._file_items = OrderedDict()
+        for item in items:
+            fspath = item.fspath
+            if fspath not in self._file_idx:
+                self._file_idx[fspath] = len(self._file_order)
+                self._file_order.append(fspath)
+                self._file_items[fspath] = []
+            self._file_items[fspath].append(item)
+
+        # Per-item state: maps item → (_SCHEDULED | _RUNNING | _DONE, letter, color)
+        self._item_state = {}
+        for item in items:
+            self._item_state[item] = (_SCHEDULED, ".", "")
+
         # detect capability
         self._live = (
             tr is not None
@@ -58,55 +83,56 @@ class _LiveReporter:
             self._tw.write = self._orig_write
             self._tw.line = self._orig_line
 
-    # -- live dot output ------------------------------------------------------
+    # -- pre-print all files --------------------------------------------------
 
-    def write_dot(self, item, report):
-        """Append a dot to the correct file line using cursor movement."""
-        self._reported += 1
-        fspath = item.fspath
-
-        letter = self._letter_for(report)
-        color = self._color_for(report)
-
-        is_new = fspath not in self._file_idx
-        if is_new:
-            self._file_idx[fspath] = len(self._file_order)
-            self._file_order.append(fspath)
-            self._file_letters[fspath] = []
-
-        self._file_letters[fspath].append((letter, color))
-
+    def pre_print(self):
+        """Print all collected file lines with dim scheduled dots."""
+        if not self._live:
+            return
         f = self._tw._file
-        idx = self._file_idx[fspath]
-        bottom = len(self._file_order)  # cursor rests on line after last file
-
-        if is_new:
-            # cursor is at rest (line after last file) → write new line here
+        for fspath in self._file_order:
             self._write_line(fspath)
-            f.write("\n")               # new rest line
-        else:
-            lines_up = bottom - idx
-            f.write(f"\033[{lines_up}A")  # up to file line
-            self._write_line(fspath)
-            f.write(f"\033[{lines_up}B")  # back down
-            f.write("\r")                 # column 0
+            f.write("\n")
         f.flush()
 
-    def finish(self):
-        """Reset terminal reporter state after live output.
+    # -- state transitions ----------------------------------------------------
 
-        Suppresses the final progress write that the terminal reporter's
-        pytest_runtestloop wrapper normally emits — we already wrote
-        progress on each file line.
-        """
+    def mark_running(self, item):
+        """Mark a test as currently running and update its file line."""
+        with self._lock:
+            self._item_state[item] = (_RUNNING, "●", "")
+            if self._live:
+                self._update_file_line(item.fspath)
+
+    def mark_done(self, item, report):
+        """Mark a test as completed and update its file line."""
+        with self._lock:
+            self._reported += 1
+            letter = self._letter_for(report)
+            color = self._color_for(report)
+            self._item_state[item] = (_DONE, letter, color)
+            if self._live:
+                self._update_file_line(item.fspath)
+
+    def finish(self):
+        """Reset terminal reporter state after live output."""
         if self._tr:
             self._tr.currentfspath = None
-            # The terminal reporter's pytest_runtestloop wrapper writes a
-            # final "[100%]" after the loop.  Since we already handle
-            # progress in each file line, suppress it.
             self._tr._write_progress_information_filling_space = lambda: None
 
     # -- internals ------------------------------------------------------------
+
+    def _update_file_line(self, fspath):
+        """Rewrite a single file line using cursor movement."""
+        f = self._tw._file
+        idx = self._file_idx[fspath]
+        bottom = len(self._file_order)
+        lines_up = bottom - idx
+        f.write(f"\033[{lines_up}A")
+        self._write_line(fspath)
+        f.write(f"\033[{lines_up}B")
+        f.write("\r")
+        f.flush()
 
     def _write_line(self, fspath):
         f = self._tw._file
@@ -117,16 +143,27 @@ class _LiveReporter:
 
         progress = f" [{100 * self._reported // self._total:3d}%]"
 
-        f.write("\r\033[K")             # clear line
+        f.write("\r\033[K")
         f.write(rel + " ")
-        for letter, color in self._file_letters[fspath]:
-            if color:
-                f.write(f"{color}{letter}\033[0m")
+
+        n_slots = 0
+        for item in self._file_items[fspath]:
+            state, letter, color = self._item_state[item]
+            n_slots += 1
+            if state == _SCHEDULED:
+                # middle dot — visually lighter than result letters
+                f.write(f"\033[2m·\033[0m")
+            elif state == _RUNNING:
+                # bright cyan indicator
+                f.write(f"\033[36;1m●\033[0m")
             else:
-                f.write(letter)
-        # right-justify progress
-        n_dots = len(self._file_letters[fspath])
-        used = len(rel) + 1 + n_dots + len(progress)
+                # completed — colored result
+                if color:
+                    f.write(f"{color}{letter}\033[0m")
+                else:
+                    f.write(letter)
+
+        used = len(rel) + 1 + n_slots + len(progress)
         if used < self._width:
             f.write(" " * (self._width - used))
         f.write(progress)
@@ -277,9 +314,11 @@ class ParallelRunner:
 
         call_results = {}
         reported = set()
-        live = _LiveReporter(session, total=len(items))
+        live = _LiveReporter(session, items)
+        live.pre_print()
 
         def _do_call(test_item):
+            live.mark_running(test_item)
             call_info = CallInfo.from_call(
                 lambda: test_item.runtest(), when="call"
             )
@@ -297,6 +336,8 @@ class ParallelRunner:
                     item=item, call=call_info
                 )
 
+            report = call_rep if call_rep else setup_reports[item]
+
             if live.live:
                 # Suppress terminal reporter output, fire hooks for stats
                 live.suppress()
@@ -310,9 +351,7 @@ class ParallelRunner:
                     if call_rep is not None:
                         ihook.pytest_runtest_logreport(report=call_rep)
                 live.restore()
-                # Write the dot with cursor movement
-                report = call_rep if call_rep else setup_reports[item]
-                live.write_dot(item, report)
+                live.mark_done(item, report)
             else:
                 # Plain fallback (non-TTY, verbose, etc.)
                 ihook.pytest_runtest_logstart(
