@@ -75,7 +75,7 @@ class TestConcurrencyEdgeCases:
         ftdir.copy_case("edge_sigint")
         proc = subprocess.Popen(
             [sys.executable, "-m", "pytest", str(ftdir.path),
-             "--freethreaded", "3", "-v"],
+             "--freethreaded", "3"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -96,3 +96,5 @@ class TestConcurrencyEdgeCases:
             )
         assert proc.returncode != 0
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
+        # Running tests show as I (interrupted), not as passed/failed
+        assert "I" in stdout, f"Expected 'I' (interrupted) markers in output:\n{stdout}"

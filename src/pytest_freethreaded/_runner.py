@@ -113,6 +113,28 @@ class _LiveReporter:
             if self._live:
                 self._update_file_line(item.fspath)
 
+    def mark_interrupted(self, item):
+        """Mark an unreported item after KeyboardInterrupt.
+
+        Items that were running show as 'I' (interrupted); items still
+        scheduled show as 'C' (cancelled).  Already-done items are left
+        unchanged.
+        """
+        with self._lock:
+            state, _, _ = self._item_state[item]
+            if state == _DONE:
+                return
+            self._reported += 1
+            if state == _RUNNING:
+                letter, color = "I", "\033[35;1m"  # magenta bold
+            else:
+                letter, color = "C", "\033[2m"      # dim
+            self._item_state[item] = (_DONE, letter, color)
+            if self._live:
+                self._update_file_line(item.fspath)
+            else:
+                self._maybe_flush_file(item.fspath)
+
     def mark_done(self, item, report):
         """Mark a test as completed and update its file line.
 
@@ -458,7 +480,11 @@ class ParallelRunner:
         # Phase 3: report any remaining items (setup failures, stragglers)
         for item in items:
             if item not in reported:
-                _report_item(item)
+                if interrupted:
+                    live.mark_interrupted(item)
+                    reported.add(item)
+                else:
+                    _report_item(item)
 
         live.finish()
 
