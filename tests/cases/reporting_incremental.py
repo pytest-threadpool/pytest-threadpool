@@ -19,4 +19,4 @@ class TestStaggered:
         pass
 
     def test_slow(self):
-        time.sleep(0.3)
+        time.sleep(1)

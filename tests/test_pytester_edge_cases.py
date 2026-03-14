@@ -10,11 +10,14 @@ from tests.conftest import CASES_DIR
 
 
 def _run_and_sigint(ftdir, *, threads="3"):
-    """Launch pytest in a subprocess and send SIGINT after 1s.
+    """Launch pytest in a subprocess, wait for tests to start, then SIGINT.
 
-    Returns (stdout, stderr, returncode).  Kills the process if it
-    doesn't exit within 10s.
+    Polls for a ``.sigint_ready`` marker file that the test case writes
+    once a test body begins executing, instead of using a fixed sleep.
+    Returns (stdout, stderr, returncode).
     """
+    ready_path = ftdir.path / ".sigint_ready"
+    ready_path.unlink(missing_ok=True)
     proc = subprocess.Popen(
         [sys.executable, "-m", "pytest", str(ftdir.path),
          "--freethreaded", threads],
@@ -23,7 +26,14 @@ def _run_and_sigint(ftdir, *, threads="3"):
         text=True,
         cwd=str(ftdir.path),
     )
-    time.sleep(1)
+    # Wait for test body to start (up to 10s)
+    deadline = time.monotonic() + 10
+    while not ready_path.exists():
+        if time.monotonic() > deadline:
+            proc.kill()
+            proc.wait()
+            raise AssertionError("Subprocess did not reach test body within 10s")
+        time.sleep(0.05)
     proc.send_signal(signal.SIGINT)
     try:
         stdout, stderr = proc.communicate(timeout=10)

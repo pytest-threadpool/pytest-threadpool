@@ -1,11 +1,17 @@
 """Many slow parallel tests — SIGINT must still produce output."""
 import time
+from pathlib import Path
+
 import pytest
+
+_READY = Path(__file__).parent / ".sigint_ready"
 
 
 @pytest.mark.parallelizable("children")
 class TestManySlowParallel:
-    def test_slow_00(self): time.sleep(30)
+    def test_slow_00(self):
+        _READY.write_text("ready")
+        time.sleep(30)
     def test_slow_01(self): time.sleep(30)
     def test_slow_02(self): time.sleep(30)
     def test_slow_03(self): time.sleep(30)
