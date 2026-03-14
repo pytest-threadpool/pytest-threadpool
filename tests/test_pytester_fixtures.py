@@ -42,6 +42,12 @@ class TestFixturesUnderParallel:
         result = ftdir.run_pytest("--freethreaded", "auto")
         result.assert_outcomes(passed=3)
 
+    def test_autouse_function_scoped_in_parallel(self, ftdir):
+        """Autouse function-scoped fixtures get fresh values per test in parallel."""
+        ftdir.copy_case("fixture_autouse_function")
+        result = ftdir.run_pytest("--freethreaded", "3")
+        result.assert_outcomes(passed=4)
+
     def test_fixture_teardown_exception_runs_all_finalizers(self, ftdir):
         """A failing finalizer must not prevent remaining finalizers from running."""
         ftdir.copy_case("fixture_teardown_exception")
