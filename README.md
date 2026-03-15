@@ -1,7 +1,7 @@
 # pytest-threadpool
 
-![PyPI - Version](https://img.shields.io/pypi/v/pytest-threadpool)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pytest-threadpool)
+[![PyPI - Version](https://img.shields.io/pypi/v/pytest-threadpool)](https://pypi.org/project/pytest-threadpool/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pytest-threadpool)](https://pypi.org/project/pytest-threadpool/)
 [![License](https://img.shields.io/github/license/pytest-threadpool/pytest-threadpool)](https://github.com/pytest-threadpool/pytest-threadpool/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-pytest--threadpool-blue?logo=github)](https://github.com/pytest-threadpool/pytest-threadpool)
 [![CI](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml)
