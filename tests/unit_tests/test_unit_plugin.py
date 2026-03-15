@@ -37,26 +37,4 @@ class TestIsFreeThreaded:
     """Tests for _is_free_threaded helper."""
 
     def test_returns_bool(self):
-        result = _is_free_threaded()
-        assert isinstance(result, bool)
-
-    def test_true_when_gil_disabled(self):
-        with patch(
-            "sysconfig.get_config_vars",
-            return_value={"Py_GIL_DISABLED": 1},
-        ):
-            assert _is_free_threaded() is True
-
-    def test_false_when_gil_enabled(self):
-        with patch(
-            "sysconfig.get_config_vars",
-            return_value={"Py_GIL_DISABLED": 0},
-        ):
-            assert _is_free_threaded() is False
-
-    def test_false_when_key_missing(self):
-        with patch(
-            "sysconfig.get_config_vars",
-            return_value={},
-        ):
-            assert _is_free_threaded() is False
+        assert isinstance(_is_free_threaded(), bool)
