@@ -107,7 +107,7 @@ src/pytest_threadpool/
     _constants.py     # ParallelScope and _GroupPrefix enums
     _markers.py       # MarkerResolver: marker introspection
     _grouping.py      # GroupKeyBuilder: parallel batch grouping
-    _fixtures.py      # FixtureManager: finalizer save/restore
+    _fixtures.py      # FixtureManager: fixture cloning, shared cache population, finalizer save/restore
     _runner.py        # ParallelRunner: parallel execution orchestration
     plugin.py         # pytest hook implementations (wiring only)
 

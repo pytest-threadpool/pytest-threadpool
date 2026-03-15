@@ -1,5 +1,6 @@
 """Fixture finalizer save/restore helpers for parallel execution."""
 
+from _pytest.fixtures import FixtureDef
 from _pytest.scope import Scope
 
 
@@ -11,6 +12,40 @@ class FixtureManager:
     manipulation.  These are the same internals that pytest's own
     runner.py and fixtures.py use.
     """
+
+    @staticmethod
+    def clone_function_fixturedefs(item) -> None:
+        """Clone function-scoped FixtureDefs so this item has its own copies.
+
+        Shared (module/class/session) FixtureDefs are kept as-is — their
+        cached values are read-only after the first item's setup.
+        Function-scoped FixtureDefs get independent copies with fresh
+        cached_result and _finalizers, allowing concurrent fixture setup
+        across items without racing on shared singleton state.
+        """
+        # noinspection PyProtectedMember
+        # request._arg2fixturedefs, fixturedef._scope: no public API;
+        # mirrors pytest's own TopRequest/FixtureDef internals.
+        request = getattr(item, "_request", None)
+        if not request or not hasattr(request, "_arg2fixturedefs"):
+            return
+
+        new_arg2fds = {}
+        for argname, fds in request._arg2fixturedefs.items():  # pyright: ignore[reportPrivateUsage]
+            new_fds = []
+            for fd in fds:
+                if fd._scope is Scope.Function:  # pyright: ignore[reportPrivateUsage]
+                    clone = FixtureDef.__new__(FixtureDef)
+                    clone.__dict__.update(fd.__dict__)
+                    clone.cached_result = None
+                    clone._finalizers = []  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+                    new_fds.append(clone)
+                else:
+                    new_fds.append(fd)
+            new_arg2fds[argname] = new_fds
+
+        # _arg2fixturedefs is typed Final but not enforced at runtime
+        object.__setattr__(request, "_arg2fixturedefs", new_arg2fds)
 
     @staticmethod
     def save_and_clear_function_fixtures(item) -> list:
@@ -57,6 +92,39 @@ class FixtureManager:
             for fixturedef in fixturedefs:
                 if fixturedef._scope is Scope.Function and fixturedef.cached_result is not None:  # pyright: ignore[reportPrivateUsage]
                     fixturedef.cached_result = None
+
+    @staticmethod
+    def populate_shared_fixtures(item) -> None:
+        """Resolve only non-function-scoped fixtures for the item.
+
+        Populates shared fixture caches (module/class/session scope) by
+        calling getfixturevalue for each non-function-scoped fixture.
+        Function-scoped fixtures are skipped — they will be created later
+        from cloned FixtureDefs in parallel workers.
+
+        Must be called inside a setup hook context (item in setupstate)
+        so that addfinalizer works for the resolved fixtures.
+        """
+        # noinspection PyProtectedMember
+        # request._arg2fixturedefs, fixturedef._scope: no public API;
+        # mirrors pytest's own TopRequest/FixtureDef internals.
+        request = getattr(item, "_request", None)
+        if not request or not hasattr(request, "_arg2fixturedefs"):
+            return
+
+        for argname in item.fixturenames:
+            if argname in item.funcargs:
+                continue
+            fds = request._arg2fixturedefs.get(argname, [])  # pyright: ignore[reportPrivateUsage]
+            if fds and fds[-1]._scope is not Scope.Function:  # pyright: ignore[reportPrivateUsage]
+                value = request.getfixturevalue(argname)
+                item.funcargs[argname] = value
+                # Eagerly initialize lazy state on shared fixture values.
+                # TmpPathFactory.getbasetemp() lazily creates the basetemp
+                # directory; without this, parallel workers would race on
+                # the first tmp_path_factory.mktemp() call.
+                if hasattr(value, "getbasetemp"):
+                    value.getbasetemp()
 
     @staticmethod
     def save_collector_finalizers(session, next_item) -> list:

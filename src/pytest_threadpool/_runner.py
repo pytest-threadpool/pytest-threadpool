@@ -339,12 +339,17 @@ class ParallelRunner:
         ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
 
     def _run_parallel(self, items) -> None:
-        """Run a group's tests with parallel call phases.
+        """Run a group's tests with parallel fixture setup and calls.
 
-        1. Sequential: setup every item (no reporting yet).
-        2. Parallel:   item.runtest() in a thread pool.
-        3. Sequential: report setup and call results per item.
-        4. Sequential: teardown.
+        Function-scoped FixtureDefs are cloned per-item so their setup can
+        run concurrently alongside the test call.  Shared fixtures
+        (module/class/session scope) are set up once via the first item,
+        then served from cache to all workers.
+
+        1. Sequential: set up first item (populates shared fixture caches).
+        2. Sequential: prepare remaining items (_initrequest + clone FixtureDefs).
+        3. Parallel:   workers run setup (cloned fixtures) + call per item.
+        4. Sequential: report, teardown.
         """
         session = self._session
         setup_passed = {}
@@ -352,12 +357,12 @@ class ParallelRunner:
         per_item_fixture_fins = {}
         saved_collector_fins = []
 
-        # Phase 1: sequential setup (silent)
         # noinspection PyProtectedMember
         # item._request/_initrequest and session._setupstate: no public API
         # for request lifecycle or setup state management.  Mirrors pytest's
         # own runner.py (_pytest.runner.runtestprotocol / SetupState).
-        for item in items:
+        def _setup_first_item(item):
+            """Full sequential setup for the first item (caches shared fixtures)."""
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
                 item._initrequest()  # pyright: ignore[reportPrivateUsage]
 
@@ -382,6 +387,8 @@ class ParallelRunner:
 
         if session.config.getoption("setuponly", False):
             for item in items:
+                _setup_first_item(item)
+            for item in items:
                 ihook = item.ihook
                 ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
@@ -390,29 +397,123 @@ class ParallelRunner:
             self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
             return
 
-        # Phase 2: parallel calls with live reporting
-        callable_items = [it for it in items if setup_passed.get(it)]
-        workers = min(self._nthreads, len(callable_items)) if callable_items else 1
+        # Phase 1+2: fire hooks for all items, populate shared fixture caches,
+        # and clone function-scoped FixtureDefs.
+        #
+        # The first item that passes hook evaluation resolves shared fixtures
+        # (module/class/session scope) to populate FixtureDef caches.  All
+        # subsequent items get cache hits for shared fixtures.  Function-scoped
+        # fixtures are NOT created here — they are deferred to parallel workers.
+        #
+        # noinspection PyProtectedMember
+        parallel_items = []
+        shared_populated = False
 
+        for item in items:
+            if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]
+
+            # Handle collector transitions (needed for PKG_CHILDREN groups
+            # that span multiple modules).
+            needed = set(item.listchain())
+            if any(node not in needed for node in session._setupstate.stack):  # pyright: ignore[reportPrivateUsage]
+                saved_collector_fins.extend(
+                    FixtureManager.save_collector_finalizers(session, item)
+                )
+                session._setupstate.teardown_exact(nextitem=item)  # pyright: ignore[reportPrivateUsage]
+
+            # Fire setup hooks with a custom setup function:
+            # - First eligible item: resolve shared fixtures only (populates caches)
+            # - Remaining items: no-op (shared caches already populated)
+            # This evaluates skip/xfail markers and initializes capture/logging
+            # without creating function-scoped fixtures.
+            original_setup = item.setup
+            if not shared_populated:
+                item.setup = lambda i=item: FixtureManager.populate_shared_fixtures(i)
+            else:
+                item.setup = lambda: None
+            try:
+                hook_rep = call_and_report(item, "setup", log=False)
+            finally:
+                item.setup = original_setup
+
+            # Pop item from setupstate (pushed by _setupstate.setup inside the
+            # hook) so the next item's hook doesn't fail the stack assertion.
+            if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
+                session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
+
+            if not hook_rep.passed:
+                # Hooks raised (skip, skipif, xfail NOTRUN, etc.)
+                setup_reports[item] = hook_rep
+                setup_passed[item] = False
+                continue
+
+            if not shared_populated:
+                shared_populated = True
+
+            FixtureManager.clone_function_fixturedefs(item)
+            parallel_items.append(item)
+
+        # Push all parallel items to setupstate stack so addfinalizer
+        # assertions pass during fixture resolution in worker threads.
+        # Done after the hook loop so items don't interfere with each
+        # other's _setupstate.setup() assertions.
+        for item in parallel_items:
+            session._setupstate.stack[item] = ([item.teardown], None)  # pyright: ignore[reportPrivateUsage]
+
+        # Phase 3: parallel setup + call
+        workers = min(self._nthreads, len(parallel_items) or 1)
         call_results = {}
         reported = set()
         live = _LiveReporter(session, items)
         live.pre_print()
 
-        def _do_call(test_item):
+        cancelled = threading.Event()
+
+        def _do_setup_and_call(test_item):
+            """Setup + call worker (for items with cloned FixtureDefs).
+
+            Fixture setup uses cloned function-scoped FixtureDefs so each
+            worker creates independent fixture instances without racing
+            on shared FixtureDef state.  Shared fixtures are already cached
+            from the first item's sequential setup, so their FixtureDef.execute()
+            is a cache-hit read.
+
+            addfinalizer is redirected to a per-item list to avoid the
+            setupstate stack assertion (the item IS in the stack, but
+            list.append on the stack entry is also safe on free-threaded Python;
+            the redirect simply avoids coupling to setupstate internals).
+            """
             if cancelled.is_set():
-                return test_item, CallInfo.from_call(lambda: None, when="call")
-            live.mark_running(test_item)
-            call_info = CallInfo.from_call(lambda: test_item.runtest(), when="call")
-            if not cancelled.is_set():
-                live.mark_call_done(test_item, call_info.excinfo)
-            return test_item, call_info
+                return test_item, None, None, []
+
+            # Redirect node.addfinalizer to per-item list
+            original_addfinalizer = test_item.addfinalizer
+            node_fins = []
+            test_item.addfinalizer = lambda fin: node_fins.append(fin)
+
+            try:
+                setup_info = CallInfo.from_call(lambda: test_item.setup(), when="setup")
+            finally:
+                test_item.addfinalizer = original_addfinalizer
+
+            if setup_info.excinfo is None:
+                fixture_fins = FixtureManager.save_and_clear_function_fixtures(test_item)
+                if not cancelled.is_set():
+                    live.mark_running(test_item)
+                    call_info = CallInfo.from_call(lambda: test_item.runtest(), when="call")
+                    if not cancelled.is_set():
+                        live.mark_call_done(test_item, call_info.excinfo)
+                    return test_item, setup_info, call_info, fixture_fins
+                return test_item, setup_info, None, fixture_fins
+
+            FixtureManager.clear_function_fixture_caches(test_item)
+            return test_item, setup_info, None, []
 
         def _report_item(item):
             """Report a single item — live cursor mode or plain fallback."""
             ihook = item.ihook
 
-            # Build the call report first (needed for a live dot letter)
             call_rep = None
             if setup_passed[item] and item in call_results:
                 call_info = call_results[item]
@@ -420,10 +521,6 @@ class ParallelRunner:
 
             report = call_rep or setup_reports[item]
 
-            # Suppress terminal reporter output, fire hooks for stats only.
-            # try/finally ensures restore() runs even on KeyboardInterrupt,
-            # otherwise the terminal writer stays suppressed and pytest's
-            # interrupt traceback is silently lost.
             live.suppress()
             try:
                 ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
@@ -440,8 +537,7 @@ class ParallelRunner:
             reported.add(item)
 
         interrupted = False
-        cancelled = threading.Event()
-        if workers > 1 and len(callable_items) > 1:
+        if workers > 1 and len(parallel_items) > 1:
             work_queue = queue.SimpleQueue()
             result_queue = queue.SimpleQueue()
 
@@ -451,16 +547,21 @@ class ParallelRunner:
                     if work_item is None or cancelled.is_set():
                         return
                     try:
-                        result = _do_call(work_item)
+                        item, setup_info, call_info, fixture_fins = _do_setup_and_call(work_item)
+                        per_item_fixture_fins[item] = fixture_fins
+                        if setup_info is not None:
+                            setup_rep = item.ihook.pytest_runtest_makereport(
+                                item=item, call=setup_info
+                            )
+                            setup_reports[item] = setup_rep
+                            setup_passed[item] = setup_info.excinfo is None
+                        result_queue.put((item, call_info))
                     except BaseException as exc:
-                        # Ensure the result queue always gets an entry so the
-                        # main thread never blocks forever on .get().
                         call_info = CallInfo.from_call(
                             lambda e=exc: (_ for _ in ()).throw(e),
                             when="call",
                         )
-                        result = (work_item, call_info)
-                    result_queue.put(result)
+                        result_queue.put((work_item, call_info))
 
             threads = []
             for _ in range(workers):
@@ -468,36 +569,46 @@ class ParallelRunner:
                 t.start()
                 threads.append(t)
 
-            for ci in callable_items:
-                work_queue.put(ci)
+            # Submit all parallel items (setup + call)
+            for item in parallel_items:
+                work_queue.put(item)
 
             try:
-                remaining = len(callable_items)
-                while remaining > 0:
-                    item, call_info = result_queue.get()
-                    call_results[item] = call_info
-                    _report_item(item)
-                    remaining -= 1
+                collected = 0
+                while collected < len(parallel_items):
+                    finished_item, call_info = result_queue.get()
+                    if call_info is not None:
+                        call_results[finished_item] = call_info
+                    _report_item(finished_item)
+                    collected += 1
             except KeyboardInterrupt:
                 interrupted = True
                 cancelled.set()
 
-            # Signal workers to stop (best-effort; they're daemon threads)
             for _ in range(workers):
                 work_queue.put(None)
             if not interrupted:
                 for t in threads:
                     t.join()
         else:
+            # Single worker fallback: sequential setup + call
             try:
-                for item in callable_items:
-                    _, call_info = _do_call(item)
-                    call_results[item] = call_info
+                for item in parallel_items:
+                    item, setup_info, call_info, fixture_fins = _do_setup_and_call(item)
+                    per_item_fixture_fins[item] = fixture_fins
+                    if setup_info is not None:
+                        setup_rep = item.ihook.pytest_runtest_makereport(
+                            item=item, call=setup_info
+                        )
+                        setup_reports[item] = setup_rep
+                        setup_passed[item] = setup_info.excinfo is None
+                    if call_info is not None:
+                        call_results[item] = call_info
                     _report_item(item)
             except KeyboardInterrupt:
                 interrupted = True
 
-        # Phase 3: report any remaining items (setup failures, stragglers)
+        # Report any remaining items (setup failures, stragglers)
         if not interrupted:
             for item in items:
                 if item not in reported:
@@ -505,7 +616,13 @@ class ParallelRunner:
 
         live.finish()
 
-        # Phase 4: teardown (always runs, even after interrupt)
+        # Pop parallel items from setupstate stack
+        # noinspection PyProtectedMember
+        for item in parallel_items:
+            if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
+                session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
+
+        # Teardown (always runs, even after interrupt)
         self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
 
         if interrupted:

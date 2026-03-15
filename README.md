@@ -1,7 +1,7 @@
 # pytest-threadpool
 
-[![PyPI](https://img.shields.io/pypi/v/pytest-threadpool.svg)](https://pypi.org/project/pytest-threadpool/)
-[![Python](https://img.shields.io/pypi/pyversions/pytest-threadpool.svg)](https://pypi.org/project/pytest-threadpool/)
+![PyPI - Version](https://img.shields.io/pypi/v/pytest-threadpool)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pytest-threadpool)
 [![License](https://img.shields.io/github/license/pytest-threadpool/pytest-threadpool)](https://github.com/pytest-threadpool/pytest-threadpool/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-pytest--threadpool-blue?logo=github)](https://github.com/pytest-threadpool/pytest-threadpool)
 [![CI](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml)
@@ -9,8 +9,9 @@
 
 **Status: Beta** · Parallel test execution for free-threaded Python builds (3.13t+).
 
-Runs test *bodies* concurrently in a `ThreadPoolExecutor` while keeping
-fixture setup/teardown sequential (pytest internals are not thread-safe).
+Runs test *bodies* and function-scoped fixture setup concurrently in a thread
+pool while keeping shared fixtures (module/class/session scope) and teardown
+sequential.
 
 ## Installation
 
@@ -57,6 +58,24 @@ def test_must_be_sequential(): ...
 | `children`   | All nested tests run concurrently (children, grandchildren, etc.) |
 | `parameters` | Parametrized variants of the same test run concurrently           |
 | `all`        | Combines `children` + `parameters`                                |
+
+## Fixture handling
+
+Function-scoped fixtures are cloned per-item and set up in parallel alongside
+test calls. Each worker gets independent fixture instances — no shared mutable
+state between concurrent fixture setups.
+
+Shared fixtures (module, class, and session scope) are resolved once
+sequentially before workers launch and served from cache to all items.
+
+| Scope      | Behavior                                        |
+|------------|-------------------------------------------------|
+| `function` | Cloned per-item, set up in parallel workers     |
+| `class`    | Resolved once, cached, shared across items      |
+| `module`   | Resolved once, cached, shared across items      |
+| `session`  | Resolved once, cached, shared across items      |
+
+Teardown for all scopes runs sequentially after the parallel group completes.
 
 ## Marker levels
 
