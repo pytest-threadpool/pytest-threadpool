@@ -1,6 +1,6 @@
 [project]
 name = "pytest-threadpool"
-version = "0.3.0"
+version = "0.3.1"
 description = "Parallel test execution for free-threaded Python builds"
 requires-python = ">=3.13"
 license = "MIT"
@@ -16,7 +16,6 @@ classifiers = [
 ]
 dependencies = [
     "pytest>=9.0.2",
-    "selenium>=4.41.0",
 ]
 
 [project.entry-points.pytest11]
