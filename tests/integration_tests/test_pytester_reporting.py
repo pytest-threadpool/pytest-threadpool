@@ -5,8 +5,8 @@ import re
 import shutil
 from pathlib import Path
 
-from tests.cases import reporting_package_children as pkg_children
-from tests.cases.reporting_cross_module import INIT_SRC, MOD_A_SRC, MOD_B_SRC
+from tests.integration_tests.cases import reporting_package_children as pkg_children
+from tests.integration_tests.cases.reporting_cross_module import INIT_SRC, MOD_A_SRC, MOD_B_SRC
 
 CASES_DIR = Path(__file__).parent / "cases"
 

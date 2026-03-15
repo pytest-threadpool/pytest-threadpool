@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-from tests.conftest import CASES_DIR
+from tests.integration_tests.conftest import CASES_DIR
 
 
 def _run_and_sigint(ftdir, *, threads="3"):
@@ -142,7 +142,7 @@ class TestCrossModuleParallelGroup:
         Setup/teardown of class/module collectors must not interfere with
         already-queued test items from earlier modules.
         """
-        from tests.cases.edge_cross_module_group import (
+        from tests.integration_tests.cases.edge_cross_module_group import (
             INIT_SRC,
             MOD_A_SRC,
             MOD_B_SRC,

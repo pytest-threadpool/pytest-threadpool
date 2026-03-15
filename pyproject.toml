@@ -40,9 +40,10 @@ addopts = ["--freethreaded", "auto"]
 
 [tool.pyright]
 pythonVersion = "3.13"
-include = ["src"]
+include = ["src", "tests"]
 typeCheckingMode = "standard"
 reportPrivateUsage = false
+ignore = ["tests/unit_tests"]
 
 [tool.ruff]
 target-version = "py313"

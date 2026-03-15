@@ -1,6 +1,6 @@
 """Tests for package-level marker inheritance and overrides."""
 
-from tests.cases._templates import sequential_order_class
+from tests.integration_tests.cases._templates import sequential_order_class
 
 
 class TestPackageLevelParallel:
