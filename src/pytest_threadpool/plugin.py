@@ -1,6 +1,7 @@
 """pytest plugin hooks -- wiring only, delegates to classes."""
 
 import os
+import warnings
 
 import pytest
 
@@ -53,8 +54,10 @@ def pytest_runtestloop(session):
     if nthreads is None:
         return None
     if not _is_free_threaded():
-        raise pytest.UsageError(
-            "--threadpool requires a free-threaded Python build (e.g. python3.13t or python3.14t)"
+        warnings.warn(
+            "--threadpool works best with free-threaded Python (e.g. python3.14t). "
+            "The GIL limits parallel speedup for CPU-bound tests.",
+            stacklevel=1,
         )
     runner = ParallelRunner(session, nthreads)
     return runner.run_all()

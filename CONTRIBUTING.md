@@ -13,7 +13,9 @@ This installs a free-threaded Python via uv, syncs all dependencies (including
 dev tools), and sets up a pre-commit hook that runs `ruff format`, `ruff check`,
 and `pyright` before each commit.
 
-> Python 3.13t and 3.14t ship with the GIL disabled by default.
+> Free-threaded builds (3.13t, 3.14t, 3.15t) ship with the GIL disabled and
+> provide true parallelism. Standard builds (3.13, 3.14, 3.15) are also
+> supported — threads work but the GIL serializes CPU-bound code.
 
 ## Architecture rules
 

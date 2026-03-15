@@ -48,8 +48,8 @@ def _run_and_sigint(ftdir, *, threads="3"):
 class TestFreethreadedValidation:
     """Verify the plugin rejects --threadpool on GIL-enabled Python."""
 
-    def test_rejects_gil_enabled_python(self, ftdir):
-        """--threadpool must error when running on a GIL-enabled build."""
+    def test_warns_on_gil_enabled_python(self, ftdir):
+        """--threadpool must warn (not error) when running on a GIL-enabled build."""
         ftdir.copy_case("validate_threadpool")
         # Copy the conftest that fakes sys._is_gil_enabled = True
         shutil.copy2(
@@ -57,11 +57,9 @@ class TestFreethreadedValidation:
             ftdir.path / "conftest.py",
         )
         result = ftdir.run_pytest("--threadpool", "2")
-        assert result.returncode != 0
-        assert (
-            "free-threaded Python build" in result.stderr
-            or "free-threaded Python build" in result.stdout
-        )
+        assert result.returncode == 0
+        output = result.stdout + result.stderr
+        assert "GIL limits parallel speedup" in output
 
 
 class TestSetupFailures:

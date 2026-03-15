@@ -7,11 +7,15 @@
 [![CI](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pytest-threadpool/pytest-threadpool/branch/main/graph/badge.svg)](https://codecov.io/gh/pytest-threadpool/pytest-threadpool)
 
-**Status: Beta** · Parallel test execution for free-threaded Python builds (3.13t+).
+**Status: Beta** · Parallel test execution using threads.
 
 Runs test *bodies*, function-scoped fixture setup, and function-scoped fixture
 teardown concurrently in a thread pool while keeping shared fixtures
 (module/class/session scope) sequential.
+
+Works on any Python 3.13+. Free-threaded builds (3.13t, 3.14t, 3.15t) get true
+parallelism for CPU-bound tests. Standard builds still benefit from parallel
+execution of I/O-bound tests (network, database, file operations).
 
 ## Installation
 
@@ -150,8 +154,11 @@ pytest
 
 | Component | Versions |
 |-----------|----------|
-| Python    | 3.13t, 3.14t, 3.15t |
+| Python    | 3.13, 3.13t, 3.14, 3.14t, 3.15, 3.15t |
 | pytest    | >=9.0.2 |
+
+> **Note:** On standard (GIL-enabled) builds, the GIL limits parallel speedup
+> for CPU-bound tests. I/O-bound tests still run concurrently.
 
 ## Known limitations
 
