@@ -5,12 +5,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --python 3.14t --group dev
       - run: uv run ruff format --check src/ tests/
@@ -25,6 +28,8 @@ jobs:
         python: ["3.13t", "3.14t", "3.15t"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
       - run: uv python install ${{ matrix.python }}
       - run: uv sync --python ${{ matrix.python }} --group dev

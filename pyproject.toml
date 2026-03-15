@@ -1,6 +1,6 @@
 [project]
 name = "pytest-threadpool"
-version = "0.3.2"
+dynamic = ["version"]
 description = "Parallel test execution for free-threaded Python builds"
 requires-python = ">=3.13"
 license = "MIT"
@@ -29,8 +29,14 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/pytest_threadpool/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pytest_threadpool"]
@@ -44,10 +50,11 @@ pythonVersion = "3.13"
 include = ["src", "tests"]
 typeCheckingMode = "standard"
 reportPrivateUsage = false
-ignore = ["tests/unit_tests"]
+ignore = ["tests/unit_tests", "src/pytest_threadpool/_version.py"]
 
 [tool.ruff]
 target-version = "py313"
+exclude = ["src/pytest_threadpool/_version.py"]
 src = ["src", "tests"]
 line-length = 99
 

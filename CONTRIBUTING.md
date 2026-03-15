@@ -40,10 +40,13 @@ Any mutable state needed across tests or across a test run must be held as
 class attributes or instance attributes — never as module-level variables.
 
 ```python
+import threading
+
 # Good
 class TestState:
-    log = {}
-    barrier = threading.Barrier(3, timeout=10)
+  log = {}
+  barrier = threading.Barrier(3, timeout=10)
+
 
 # Bad
 _log = {}
@@ -67,9 +70,11 @@ subprocess with the exact thread count needed. Use explicit thread counts for
 barrier-based tests (not `auto`) to avoid deadlocks on low-core machines.
 
 ```python
+import threading
+
 # Good — isolated subprocess via ftdir, explicit thread count
 def test_children_run_concurrently(self, ftdir):
-    ftdir.makepyfile("""
+  ftdir.makepyfile("""
         import threading, pytest
         @pytest.mark.parallelizable("children")
         class TestBarrier:
@@ -77,14 +82,17 @@ def test_children_run_concurrently(self, ftdir):
             def test_a(self): self.barrier.wait()
             def test_b(self): self.barrier.wait()
     """)
-    result = ftdir.run_pytest("--threadpool", "2")
-    result.assert_outcomes(passed=2)
+  result = ftdir.run_pytest("--threadpool", "2")
+  result.assert_outcomes(passed=2)
+
 
 # Bad — depends on outer runner flags
 class TestBarrier:
-    barrier = threading.Barrier(2, timeout=10)
-    def test_a(self): self.barrier.wait()
-    def test_b(self): self.barrier.wait()
+  barrier = threading.Barrier(2, timeout=10)
+
+  def test_a(self): self.barrier.wait()
+
+  def test_b(self): self.barrier.wait()
 ```
 
 ### Use `pytest.fail()` for intentional failures
@@ -134,18 +142,19 @@ Every commit message starts with one or more tags in brackets:
 
 ### Tags
 
-| Tag | Scope |
-|-----|-------|
-| `[Runner]` | Core parallel execution engine (`_runner.py`, `_fixtures.py`) |
-| `[Markers]` | Marker resolution and grouping (`_markers.py`, `_grouping.py`, `_constants.py`) |
-| `[Report]` | Terminal reporting and display (`_LiveReporter`) |
-| `[Plugin]` | Plugin hooks and CLI options (`plugin.py`) |
-| `[API]` | Public API changes (`_api.py`, `__init__.py`) |
-| `[Test]` | Test additions or changes only |
-| `[Tooling]` | Ruff, pyright, pre-commit, CI, scripts |
-| `[Docs]` | README, CONTRIBUTING, docstrings |
-| `[Refactor]` | Internal restructuring, no behavior change |
-| `[Fix]` | Bug fix — must include issue number if fixing a known issue |
+| Tag          | Scope                                                                           |
+|--------------|---------------------------------------------------------------------------------|
+| `[Runner]`   | Core parallel execution engine (`_runner.py`, `_fixtures.py`)                   |
+| `[Markers]`  | Marker resolution and grouping (`_markers.py`, `_grouping.py`, `_constants.py`) |
+| `[Report]`   | Terminal reporting and display (`_LiveReporter`)                                |
+| `[Plugin]`   | Plugin hooks and CLI options (`plugin.py`)                                      |
+| `[API]`      | Public API changes (`_api.py`, `__init__.py`)                                   |
+| `[Test]`     | Test additions or changes only                                                  |
+| `[Build]`    | CI/CD pipelines, publishing, versioning                                         |
+| `[Tooling]`  | Ruff, pyright, pre-commit, scripts                                              |
+| `[Docs]`     | README, CONTRIBUTING, docstrings                                                |
+| `[Refactor]` | Internal restructuring, no behavior change                                      |
+| `[Fix]`      | Bug fix — must include issue number if fixing a known issue                     |
 
 ### Combining tags
 
