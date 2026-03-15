@@ -7,7 +7,7 @@
 [![CI](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pytest-threadpool/pytest-threadpool/branch/main/graph/badge.svg)](https://codecov.io/gh/pytest-threadpool/pytest-threadpool)
 
-Parallel test execution for free-threaded Python builds (3.13t+).
+**Status: Beta** · Parallel test execution for free-threaded Python builds (3.13t+).
 
 Runs test *bodies* concurrently in a `ThreadPoolExecutor` while keeping
 fixture setup/teardown sequential (pytest internals are not thread-safe).
@@ -126,6 +126,25 @@ pytest --threadpool 8
 # Normal sequential run (no flag)
 pytest
 ```
+
+## Tested versions
+
+| Component | Versions |
+|-----------|----------|
+| Python    | 3.13t, 3.14t, 3.15t |
+| pytest    | >=9.0.2 |
+
+## Known limitations
+
+- **Private pytest API usage** — The plugin relies on internal `_pytest` APIs
+  (fixture finalizers, setup state, terminal writer) that have no public
+  equivalents. These may break across pytest releases without warning.
+- **No plugin compatibility guarantees** — Interactions with other pytest
+  plugins (e.g. `pytest-xdist`, `pytest-timeout`, `pytest-randomly`) are
+  untested and may conflict.
+- **No captured stdout in parallel** — Standard output from tests running
+  concurrently is written directly to the terminal. Pytest's built-in capture
+  (`capsys`/`capfd`) is not supported during parallel execution.
 
 ## License
 
