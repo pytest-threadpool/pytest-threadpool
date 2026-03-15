@@ -394,7 +394,7 @@ class ParallelRunner:
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
                 if setup_passed[item] and session.config.getoption("setupshow", False):
                     show_test_item(item)
-            self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
+            self._teardown_all(items, per_item_fixture_fins, {}, saved_collector_fins)
             return
 
         # Phase 1+2: fire hooks for all items, populate shared fixture caches,
@@ -470,8 +470,8 @@ class ParallelRunner:
 
         cancelled = threading.Event()
 
-        def _do_setup_and_call(test_item):
-            """Setup + call worker (for items with cloned FixtureDefs).
+        def _do_setup_call_teardown(test_item):
+            """Setup + call + teardown worker (for items with cloned FixtureDefs).
 
             Fixture setup uses cloned function-scoped FixtureDefs so each
             worker creates independent fixture instances without racing
@@ -479,13 +479,17 @@ class ParallelRunner:
             from the first item's sequential setup, so their FixtureDef.execute()
             is a cache-hit read.
 
+            Function-scoped fixture teardown (yield cleanup, addfinalizer
+            callbacks, xunit teardown_method) also runs in the worker since
+            each item's finalizers are independent.
+
             addfinalizer is redirected to a per-item list to avoid the
             setupstate stack assertion (the item IS in the stack, but
             list.append on the stack entry is also safe on free-threaded Python;
             the redirect simply avoids coupling to setupstate internals).
             """
             if cancelled.is_set():
-                return test_item, None, None, []
+                return test_item, None, None, None
 
             # Redirect node.addfinalizer to per-item list
             original_addfinalizer = test_item.addfinalizer
@@ -499,16 +503,35 @@ class ParallelRunner:
 
             if setup_info.excinfo is None:
                 fixture_fins = FixtureManager.save_and_clear_function_fixtures(test_item)
+                call_info = None
                 if not cancelled.is_set():
                     live.mark_running(test_item)
                     call_info = CallInfo.from_call(lambda: test_item.runtest(), when="call")
                     if not cancelled.is_set():
                         live.mark_call_done(test_item, call_info.excinfo)
-                    return test_item, setup_info, call_info, fixture_fins
-                return test_item, setup_info, None, fixture_fins
+
+                # Run function-scoped fixture teardown in the worker.
+                # Includes yield cleanup, addfinalizer callbacks, and
+                # node-level finalizers captured during setup.
+                all_fins = list(node_fins) + fixture_fins
+
+                def _run_fins(fns=all_fins):
+                    exceptions = []
+                    for fn in reversed(fns):
+                        try:
+                            fn()
+                        except BaseException as e:
+                            exceptions.append(e)
+                    if len(exceptions) == 1:
+                        raise exceptions[0]
+                    if exceptions:
+                        raise BaseExceptionGroup("errors during fixture teardown", exceptions)
+
+                teardown_info = CallInfo.from_call(_run_fins, when="teardown")
+                return test_item, setup_info, call_info, teardown_info
 
             FixtureManager.clear_function_fixture_caches(test_item)
-            return test_item, setup_info, None, []
+            return test_item, setup_info, None, None
 
         def _report_item(item):
             """Report a single item — live cursor mode or plain fallback."""
@@ -536,6 +559,8 @@ class ParallelRunner:
 
             reported.add(item)
 
+        teardown_infos = {}
+
         interrupted = False
         if workers > 1 and len(parallel_items) > 1:
             work_queue = queue.SimpleQueue()
@@ -547,14 +572,15 @@ class ParallelRunner:
                     if work_item is None or cancelled.is_set():
                         return
                     try:
-                        item, setup_info, call_info, fixture_fins = _do_setup_and_call(work_item)
-                        per_item_fixture_fins[item] = fixture_fins
+                        item, setup_info, call_info, td_info = _do_setup_call_teardown(work_item)
                         if setup_info is not None:
                             setup_rep = item.ihook.pytest_runtest_makereport(
                                 item=item, call=setup_info
                             )
                             setup_reports[item] = setup_rep
                             setup_passed[item] = setup_info.excinfo is None
+                        if td_info is not None:
+                            teardown_infos[item] = td_info
                         result_queue.put((item, call_info))
                     except BaseException as exc:
                         call_info = CallInfo.from_call(
@@ -569,7 +595,7 @@ class ParallelRunner:
                 t.start()
                 threads.append(t)
 
-            # Submit all parallel items (setup + call)
+            # Submit all parallel items (setup + call + teardown)
             for item in parallel_items:
                 work_queue.put(item)
 
@@ -591,17 +617,18 @@ class ParallelRunner:
                 for t in threads:
                     t.join()
         else:
-            # Single worker fallback: sequential setup + call
+            # Single worker fallback
             try:
                 for item in parallel_items:
-                    item, setup_info, call_info, fixture_fins = _do_setup_and_call(item)
-                    per_item_fixture_fins[item] = fixture_fins
+                    item, setup_info, call_info, td_info = _do_setup_call_teardown(item)
                     if setup_info is not None:
                         setup_rep = item.ihook.pytest_runtest_makereport(
                             item=item, call=setup_info
                         )
                         setup_reports[item] = setup_rep
                         setup_passed[item] = setup_info.excinfo is None
+                    if td_info is not None:
+                        teardown_infos[item] = td_info
                     if call_info is not None:
                         call_results[item] = call_info
                     _report_item(item)
@@ -622,33 +649,46 @@ class ParallelRunner:
             if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
                 session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
 
-        # Teardown (always runs, even after interrupt)
-        self._teardown_all(items, per_item_fixture_fins, saved_collector_fins)
+        # Teardown reporting + collector teardown (always runs, even after interrupt)
+        self._teardown_all(items, per_item_fixture_fins, teardown_infos, saved_collector_fins)
 
         if interrupted:
             raise KeyboardInterrupt
 
-    def _teardown_all(self, items, per_item_fixture_fins, saved_collector_fins) -> None:
-        """Run per-item function-level finalizers, saved collector finalizers,
-        then tear down remaining collectors."""
+    def _teardown_all(
+        self, items, per_item_fixture_fins, teardown_infos, saved_collector_fins
+    ) -> None:
+        """Report teardown results, run any remaining finalizers, and tear down
+        collectors.
+
+        For items with pre-computed teardown_infos (from parallel workers),
+        only reporting happens here.  For items without (setuponly mode),
+        finalizers from per_item_fixture_fins are executed sequentially.
+        """
         session = self._session
 
         for item in items:
-            fins = per_item_fixture_fins.get(item, [])
+            if item in teardown_infos:
+                # Teardown already ran in the worker — just report.
+                teardown_info = teardown_infos[item]
+            else:
+                # Fallback: run finalizers now (setuponly mode).
+                fins = per_item_fixture_fins.get(item, [])
 
-            def _run_fins(fns=fins):
-                exceptions = []
-                for fn in reversed(fns):
-                    try:
-                        fn()
-                    except BaseException as e:
-                        exceptions.append(e)
-                if len(exceptions) == 1:
-                    raise exceptions[0]
-                if exceptions:
-                    raise BaseExceptionGroup("errors during fixture teardown", exceptions)
+                def _run_fins(fns=fins):
+                    exceptions = []
+                    for fn in reversed(fns):
+                        try:
+                            fn()
+                        except BaseException as e:
+                            exceptions.append(e)
+                    if len(exceptions) == 1:
+                        raise exceptions[0]
+                    if exceptions:
+                        raise BaseExceptionGroup("errors during fixture teardown", exceptions)
 
-            teardown_info = CallInfo.from_call(_run_fins, when="teardown")
+                teardown_info = CallInfo.from_call(_run_fins, when="teardown")
+
             rep = item.ihook.pytest_runtest_makereport(item=item, call=teardown_info)
             item.ihook.pytest_runtest_logreport(report=rep)
 

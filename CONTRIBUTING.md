@@ -87,6 +87,12 @@ class TestBarrier:
     def test_b(self): self.barrier.wait()
 ```
 
+### Use `pytest.fail()` for intentional failures
+
+In test cases that need to intentionally fail (e.g., verifying teardown after
+failure), use `pytest.fail("reason")` instead of `assert False, "reason"`.
+The latter triggers ruff PT015 and B011.
+
 ### Constants over strings
 
 Use `ParallelScope` enum and `_constants` module instead of bare string

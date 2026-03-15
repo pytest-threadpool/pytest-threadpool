@@ -9,9 +9,9 @@
 
 **Status: Beta** · Parallel test execution for free-threaded Python builds (3.13t+).
 
-Runs test *bodies* and function-scoped fixture setup concurrently in a thread
-pool while keeping shared fixtures (module/class/session scope) and teardown
-sequential.
+Runs test *bodies*, function-scoped fixture setup, and function-scoped fixture
+teardown concurrently in a thread pool while keeping shared fixtures
+(module/class/session scope) sequential.
 
 ## Installation
 
@@ -70,12 +70,12 @@ sequentially before workers launch and served from cache to all items.
 
 | Scope      | Behavior                                        |
 |------------|-------------------------------------------------|
-| `function` | Cloned per-item, set up in parallel workers     |
-| `class`    | Resolved once, cached, shared across items      |
-| `module`   | Resolved once, cached, shared across items      |
-| `session`  | Resolved once, cached, shared across items      |
+| `function` | Cloned per-item, setup and teardown in parallel workers |
+| `class`    | Resolved once, cached, shared across items              |
+| `module`   | Resolved once, cached, shared across items              |
+| `session`  | Resolved once, cached, shared across items              |
 
-Teardown for all scopes runs sequentially after the parallel group completes.
+Shared fixture teardown runs sequentially after the parallel group completes.
 
 ## Marker levels
 

@@ -1,6 +1,6 @@
 [project]
 name = "pytest-threadpool"
-version = "0.3.1"
+version = "0.3.2"
 description = "Parallel test execution for free-threaded Python builds"
 requires-python = ">=3.13"
 license = "MIT"
@@ -37,6 +37,7 @@ packages = ["src/pytest_threadpool"]
 
 [tool.pytest.ini_options]
 addopts = ["--threadpool", "auto"]
+norecursedirs = ["cases"]
 
 [tool.pyright]
 pythonVersion = "3.13"
