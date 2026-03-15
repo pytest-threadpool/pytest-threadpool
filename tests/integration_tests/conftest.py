@@ -22,6 +22,15 @@ class RunResult:
         self.returncode = returncode
         self.outlines = stdout.splitlines()
 
+    @property
+    def collected(self):
+        """Parse the 'collected N items' count from pytest output."""
+        for line in self.outlines:
+            m = re.search(r"collected (\d+) items?", line)
+            if m:
+                return int(m.group(1))
+        return None
+
     def assert_outcomes(self, **expected):
         all_keys = {"passed", "failed", "errors", "skipped", "xfailed", "xpassed"}
         defaults = dict.fromkeys(all_keys, 0)

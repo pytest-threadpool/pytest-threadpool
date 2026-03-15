@@ -148,6 +148,15 @@ class TestReporting:
             f"Latest fast: {max_fast}, earliest slow: {min_slow}."
         )
 
+    def test_collected_count_not_inflated(self, ftdir):
+        """Collected count must match actual test count, not be inflated by fixture cloning."""
+        ftdir.copy_case("collected_count")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)
+        assert result.collected == 4, (
+            f"Expected 'collected 4 items' but got {result.collected}\nstdout:\n{result.stdout}"
+        )
+
     def test_same_file_dots_grouped(self, ftdir):
         """Within a single file, dots appear on one line (no split)."""
         shutil.copy2(
