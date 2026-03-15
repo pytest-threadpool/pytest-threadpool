@@ -1,4 +1,4 @@
-"""Simple test file used to trigger --freethreaded on a faked GIL build."""
+"""Simple test file used to trigger --threadpool on a faked GIL build."""
 
 import pytest
 

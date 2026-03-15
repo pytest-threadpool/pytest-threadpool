@@ -2,7 +2,7 @@
 
 import sys
 
-from pytest_freethreaded._constants import (
+from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLEL_ONLY,
     MARKER_PARALLELIZABLE,
@@ -142,4 +142,4 @@ class MarkerResolver:
 
 
 # Import here to avoid circular; used only in scope_from_marks / own_scope
-from pytest_freethreaded._constants import ParallelScope  # noqa: E402
+from pytest_threadpool._constants import ParallelScope  # noqa: E402

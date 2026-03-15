@@ -1,10 +1,10 @@
-# Contributing to pytest-freethreaded
+# Contributing to pytest-threadpool
 
 ## Development setup
 
 ```bash
 git clone <repo-url>
-cd pytest-freethreaded
+cd pytest-threadpool
 ./scripts/setup-dev        # defaults to python 3.14t
 ./scripts/setup-dev 3.13t  # or specify a version
 ```
@@ -60,7 +60,7 @@ should not trigger construction of barriers, connections, or other resources.
 Tests that verify parallel execution (barriers, concurrent writes, thread counts)
 must use the `ftdir` fixture (defined in `conftest.py`) and `run_pytest`. Unlike
 `pytester`, `ftdir` is thread-safe — it uses `tmp_path` instead of `os.chdir()`,
-so tests can run in parallel via `--freethreaded` on the outer suite itself.
+so tests can run in parallel via `--threadpool` on the outer suite itself.
 
 Each test writes files into its own `tmp_path` directory and runs pytest as a
 subprocess with the exact thread count needed. Use explicit thread counts for
@@ -77,7 +77,7 @@ def test_children_run_concurrently(self, ftdir):
             def test_a(self): self.barrier.wait()
             def test_b(self): self.barrier.wait()
     """)
-    result = ftdir.run_pytest("--freethreaded", "2")
+    result = ftdir.run_pytest("--threadpool", "2")
     result.assert_outcomes(passed=2)
 
 # Bad — depends on outer runner flags
@@ -101,7 +101,7 @@ in hook functions — keep them thin.
 ## Project structure
 
 ```
-src/pytest_freethreaded/
+src/pytest_threadpool/
     __init__.py       # Re-exports only
     _api.py           # Public API: parallelizable, not_parallelizable
     _constants.py     # ParallelScope and _GroupPrefix enums
@@ -157,7 +157,7 @@ number when one exists:
 
 ```bash
 # Run all tests in parallel (each test spawns its own subprocess)
-pytest --freethreaded auto
+pytest --threadpool auto
 
 # Run sequentially
 pytest -v

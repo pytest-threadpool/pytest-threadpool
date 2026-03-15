@@ -2,12 +2,12 @@
 
 import types
 
-from pytest_freethreaded._constants import (
+from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLELIZABLE,
     _GroupPrefix,
 )
-from pytest_freethreaded._grouping import GroupKeyBuilder
+from pytest_threadpool._grouping import GroupKeyBuilder
 
 
 class FakeMark:

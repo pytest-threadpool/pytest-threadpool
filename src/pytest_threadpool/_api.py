@@ -1,4 +1,4 @@
-"""Public marker helpers for pytest-freethreaded."""
+"""Public marker helpers for pytest-threadpool."""
 
 from typing import Literal
 

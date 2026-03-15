@@ -16,7 +16,7 @@ MULTI_FILE_B = "def test_b1():\n    pass\n\ndef test_b2():\n    pass\n"
 
 
 class TestReporting:
-    """Verify that test results are reported correctly with --freethreaded."""
+    """Verify that test results are reported correctly with --threadpool."""
 
     def test_incremental_within_class(self, ftdir):
         """Within a single class, fast tests are reported before the slow one.
@@ -34,7 +34,7 @@ class TestReporting:
             CASES_DIR / "reporting_incremental_conftest.py",
             ftdir.path / "conftest.py",
         )
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         log_path = ftdir.path / "report_log.json"
@@ -77,7 +77,7 @@ class TestReporting:
             CASES_DIR / "reporting_incremental_conftest.py",
             ftdir.path / "conftest.py",
         )
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         log_path = ftdir.path / "report_log.json"
@@ -116,7 +116,7 @@ class TestReporting:
             CASES_DIR / "reporting_incremental_conftest.py",
             ftdir.path / "conftest.py",
         )
-        result = ftdir.run_pytest("--freethreaded", "6")
+        result = ftdir.run_pytest("--threadpool", "6")
         result.assert_outcomes(passed=6)
 
         log_path = ftdir.path / "report_log.json"
@@ -154,7 +154,7 @@ class TestReporting:
             CASES_DIR / "reporting_incremental.py",
             ftdir.path / "test_case.py",
         )
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         dot_lines = [line for line in result.outlines if re.search(r"test_case\.py\s+\.", line)]
@@ -230,7 +230,7 @@ class TestDumbMode:
     def test_one_line_per_file(self, ftdir):
         """Each file appears exactly once — no duplicates."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         a_lines = [line for line in result.outlines if re.search(r"test_a\.py\s+[.Fs]+", line)]
@@ -247,7 +247,7 @@ class TestDumbMode:
     def test_no_ansi_escapes(self, ftdir):
         """Dumb mode output contains no ANSI escape sequences."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         ansi_lines = [line for line in result.outlines if re.search(r"\033[\[\]]", line)]
@@ -256,7 +256,7 @@ class TestDumbMode:
     def test_progress_on_file_lines(self, ftdir):
         """Each file line includes a progress percentage."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         file_lines = [line for line in result.outlines if _RESULT_LINE_RE.search(line)]
@@ -274,7 +274,7 @@ class TestLiveMode:
     def test_contains_ansi_cursor_movement(self, ftdir):
         """Live mode uses ANSI cursor-up sequences for in-place updates."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result = ftdir.run_pytest_tty("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         # Cursor-up escape: ESC[nA
@@ -285,7 +285,7 @@ class TestLiveMode:
     def test_progress_line_at_end(self, ftdir):
         """Live mode has a single progress summary line (N/N [100%])."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result = ftdir.run_pytest_tty("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         screen = _render_terminal(result.stdout)
@@ -297,7 +297,7 @@ class TestLiveMode:
     def test_file_lines_no_per_line_progress(self, ftdir):
         """File lines in live mode do not have individual percentages."""
         _setup_multi_file_pkg(ftdir)
-        result = ftdir.run_pytest_tty("--freethreaded", "4")
+        result = ftdir.run_pytest_tty("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
         screen = _render_terminal(result.stdout)

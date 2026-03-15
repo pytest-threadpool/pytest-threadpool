@@ -4,7 +4,7 @@ import types
 
 from _pytest.scope import Scope
 
-from pytest_freethreaded._fixtures import FixtureManager
+from pytest_threadpool._fixtures import FixtureManager
 
 
 class FakeFixtureDef:

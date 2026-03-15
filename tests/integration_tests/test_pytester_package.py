@@ -34,7 +34,7 @@ class TestPackageLevelParallel:
             "def test_b2():\n"
             "    PkgState.barrier.wait()\n"
         )
-        result = ftdir.run_pytest("--freethreaded", "4")
+        result = ftdir.run_pytest("--threadpool", "4")
         result.assert_outcomes(passed=4)
 
     def test_subpackage_inherits_parent(self, ftdir):
@@ -64,7 +64,7 @@ class TestPackageLevelParallel:
             "def test_b1():\n"
             "    SubState.barrier.wait()\n"
         )
-        result = ftdir.run_pytest("--freethreaded", "3")
+        result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=3)
 
     def test_class_override_narrows_scope(self, ftdir):
@@ -99,7 +99,7 @@ class TestPackageLevelParallel:
             "    def test_verify(self):\n"
             "        assert set(self.param_log.keys()) == {0, 1, 2}\n"
         )
-        result = ftdir.run_pytest("--freethreaded", "6")
+        result = ftdir.run_pytest("--threadpool", "6")
         result.assert_outcomes(passed=6)
 
     def test_not_parallelizable_overrides_package(self, ftdir):
@@ -116,7 +116,7 @@ class TestPackageLevelParallel:
                 decorator="@pytest.mark.not_parallelizable",
             )
         )
-        result = ftdir.run_pytest("--freethreaded", "3")
+        result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=3)
 
     def test_module_overrides_package(self, ftdir):
@@ -131,7 +131,7 @@ class TestPackageLevelParallel:
             'pytestmark = pytest.mark.parallelizable("parameters")\n'
             "\n" + sequential_order_class("TestModOverride")
         )
-        result = ftdir.run_pytest("--freethreaded", "3")
+        result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=3)
 
     def test_subpackage_override(self, ftdir):
@@ -146,11 +146,11 @@ class TestPackageLevelParallel:
             'import pytest\npytestmark = pytest.mark.parallelizable("parameters")\n'
         )
         sub.joinpath("test_sub.py").write_text(sequential_order_class("TestSubOverride"))
-        result = ftdir.run_pytest("--freethreaded", "3")
+        result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=3)
 
     def test_parallel_only_skips_without_flag(self, ftdir):
-        """parallel_only marker skips tests when --freethreaded is not passed."""
+        """parallel_only marker skips tests when --threadpool is not passed."""
         ftdir.copy_case("parallel_only_skip")
         result = ftdir.run_pytest()
         result.assert_outcomes(passed=1, skipped=1)

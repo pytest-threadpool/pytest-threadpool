@@ -1,4 +1,4 @@
-"""Constants and enums for pytest-freethreaded."""
+"""Constants and enums for pytest-threadpool."""
 
 from enum import StrEnum
 

@@ -3,7 +3,7 @@
 import types
 from unittest.mock import patch
 
-from pytest_freethreaded.plugin import _is_free_threaded, _thread_count
+from pytest_threadpool.plugin import _is_free_threaded, _thread_count
 
 
 class TestThreadCount:

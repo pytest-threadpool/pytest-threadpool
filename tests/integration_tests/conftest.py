@@ -1,4 +1,4 @@
-"""Conftest for pytest-freethreaded plugin tests."""
+"""Conftest for pytest-threadpool plugin tests."""
 
 import os
 import re

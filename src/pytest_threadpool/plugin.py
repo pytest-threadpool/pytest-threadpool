@@ -4,18 +4,18 @@ import os
 
 import pytest
 
-from pytest_freethreaded._constants import (
+from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLEL_ONLY,
     MARKER_PARALLELIZABLE,
 )
-from pytest_freethreaded._markers import MarkerResolver
-from pytest_freethreaded._runner import ParallelRunner
+from pytest_threadpool._markers import MarkerResolver
+from pytest_threadpool._runner import ParallelRunner
 
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--freethreaded",
+        "--threadpool",
         default=None,
         metavar="N",
         help=("Parallelize marked test calls using N threads. 'auto' uses os.cpu_count()."),
@@ -25,7 +25,7 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        f"{MARKER_PARALLEL_ONLY}: skip test when not using --freethreaded",
+        f"{MARKER_PARALLEL_ONLY}: skip test when not using --threadpool",
     )
     config.addinivalue_line(
         "markers",
@@ -39,9 +39,9 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("freethreaded") is not None:
+    if config.getoption("threadpool") is not None:
         return
-    skip = pytest.mark.skip(reason="requires --freethreaded")
+    skip = pytest.mark.skip(reason="requires --threadpool")
     for item in items:
         if MARKER_PARALLEL_ONLY in item.keywords or MarkerResolver.has_package_parallel_only(item):
             item.add_marker(skip)
@@ -54,15 +54,14 @@ def pytest_runtestloop(session):
         return None
     if not _is_free_threaded():
         raise pytest.UsageError(
-            "--freethreaded requires a free-threaded Python build "
-            "(e.g. python3.13t or python3.14t)"
+            "--threadpool requires a free-threaded Python build (e.g. python3.13t or python3.14t)"
         )
     runner = ParallelRunner(session, nthreads)
     return runner.run_all()
 
 
 def _thread_count(config) -> int | None:
-    val = config.getoption("freethreaded")
+    val = config.getoption("threadpool")
     if val is None:
         return None
     if val == "auto":

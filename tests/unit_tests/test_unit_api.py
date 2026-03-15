@@ -2,7 +2,7 @@
 
 import pytest
 
-from pytest_freethreaded._api import not_parallelizable, parallelizable
+from pytest_threadpool._api import not_parallelizable, parallelizable
 
 
 class TestParallelizable:

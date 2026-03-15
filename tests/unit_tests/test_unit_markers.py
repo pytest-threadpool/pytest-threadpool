@@ -3,13 +3,13 @@
 import sys
 import types
 
-from pytest_freethreaded._constants import (
+from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLELIZABLE,
     SCOPE_NOT,
     ParallelScope,
 )
-from pytest_freethreaded._markers import MarkerResolver
+from pytest_threadpool._markers import MarkerResolver
 
 
 class FakeMark:
@@ -179,74 +179,74 @@ class TestPackageScope:
         assert MarkerResolver.package_scope(item) is None
 
     def test_finds_scope_in_package_module(self):
-        pkg_mod = types.ModuleType("mypkg")
+        pkg_mod = types.ModuleType("findscope_pkg")
         pkg_mod.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("children",))]
-        sys.modules["mypkg"] = pkg_mod
+        sys.modules["findscope_pkg"] = pkg_mod
         try:
-            mod = types.ModuleType("mypkg.test_mod")
-            mod.__package__ = "mypkg"
+            mod = types.ModuleType("findscope_pkg.test_mod")
+            mod.__package__ = "findscope_pkg"
             item = FakeItem(module=mod)
             assert MarkerResolver.package_scope(item) == "children"
         finally:
-            del sys.modules["mypkg"]
+            sys.modules.pop("findscope_pkg", None)
 
     def test_walks_parent_packages(self):
-        parent = types.ModuleType("a")
+        parent = types.ModuleType("walk_parent")
         parent.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("all",))]
-        child = types.ModuleType("a.b")
+        child = types.ModuleType("walk_parent.child")
         # child has no pytestmark
-        sys.modules["a"] = parent
-        sys.modules["a.b"] = child
+        sys.modules["walk_parent"] = parent
+        sys.modules["walk_parent.child"] = child
         try:
-            mod = types.ModuleType("a.b.test_mod")
-            mod.__package__ = "a.b"
+            mod = types.ModuleType("walk_parent.child.test_mod")
+            mod.__package__ = "walk_parent.child"
             item = FakeItem(module=mod)
             assert MarkerResolver.package_scope(item) == "all"
         finally:
-            del sys.modules["a"]
-            del sys.modules["a.b"]
+            sys.modules.pop("walk_parent", None)
+            sys.modules.pop("walk_parent.child", None)
 
     def test_nearest_package_wins(self):
-        parent = types.ModuleType("a")
+        parent = types.ModuleType("nearest_parent")
         parent.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("all",))]
-        child = types.ModuleType("a.b")
+        child = types.ModuleType("nearest_parent.child")
         child.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("children",))]
-        sys.modules["a"] = parent
-        sys.modules["a.b"] = child
+        sys.modules["nearest_parent"] = parent
+        sys.modules["nearest_parent.child"] = child
         try:
-            mod = types.ModuleType("a.b.test_mod")
-            mod.__package__ = "a.b"
+            mod = types.ModuleType("nearest_parent.child.test_mod")
+            mod.__package__ = "nearest_parent.child"
             item = FakeItem(module=mod)
             assert MarkerResolver.package_scope(item) == "children"
         finally:
-            del sys.modules["a"]
-            del sys.modules["a.b"]
+            sys.modules.pop("nearest_parent", None)
+            sys.modules.pop("nearest_parent.child", None)
 
     def test_not_parallelizable_in_package(self):
-        pkg_mod = types.ModuleType("pkg")
+        pkg_mod = types.ModuleType("notpar_pkg")
         pkg_mod.pytestmark = [FakeMark(MARKER_NOT_PARALLELIZABLE)]
-        sys.modules["pkg"] = pkg_mod
+        sys.modules["notpar_pkg"] = pkg_mod
         try:
-            mod = types.ModuleType("pkg.test_mod")
-            mod.__package__ = "pkg"
+            mod = types.ModuleType("notpar_pkg.test_mod")
+            mod.__package__ = "notpar_pkg"
             item = FakeItem(module=mod)
             assert MarkerResolver.package_scope(item) == SCOPE_NOT
         finally:
-            del sys.modules["pkg"]
+            sys.modules.pop("notpar_pkg", None)
 
     def test_skips_missing_modules(self):
         """When a package part isn't in sys.modules, it's skipped."""
-        parent = types.ModuleType("x")
+        parent = types.ModuleType("skipmissing_pkg")
         parent.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("parameters",))]
-        sys.modules["x"] = parent
-        # "x.y" deliberately not in sys.modules
+        sys.modules["skipmissing_pkg"] = parent
+        # "skipmissing_pkg.sub" deliberately not in sys.modules
         try:
-            mod = types.ModuleType("x.y.test_mod")
-            mod.__package__ = "x.y"
+            mod = types.ModuleType("skipmissing_pkg.sub.test_mod")
+            mod.__package__ = "skipmissing_pkg.sub"
             item = FakeItem(module=mod)
             assert MarkerResolver.package_scope(item) == "parameters"
         finally:
-            del sys.modules["x"]
+            sys.modules.pop("skipmissing_pkg", None)
 
 
 class TestHasPackageParallelOnly:
@@ -259,40 +259,40 @@ class TestHasPackageParallelOnly:
         assert MarkerResolver.has_package_parallel_only(item) is False
 
     def test_returns_true_when_marker_present(self):
-        pkg_mod = types.ModuleType("mypkg")
+        pkg_mod = types.ModuleType("po_present_pkg")
         pkg_mod.pytestmark = [FakeMark("parallel_only")]
-        sys.modules["mypkg"] = pkg_mod
+        sys.modules["po_present_pkg"] = pkg_mod
         try:
-            mod = types.ModuleType("mypkg.test_mod")
-            mod.__package__ = "mypkg"
+            mod = types.ModuleType("po_present_pkg.test_mod")
+            mod.__package__ = "po_present_pkg"
             item = FakeItem(module=mod)
             assert MarkerResolver.has_package_parallel_only(item) is True
         finally:
-            del sys.modules["mypkg"]
+            sys.modules.pop("po_present_pkg", None)
 
     def test_returns_false_when_marker_absent(self):
-        pkg_mod = types.ModuleType("mypkg2")
+        pkg_mod = types.ModuleType("po_absent_pkg")
         pkg_mod.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("children",))]
-        sys.modules["mypkg2"] = pkg_mod
+        sys.modules["po_absent_pkg"] = pkg_mod
         try:
-            mod = types.ModuleType("mypkg2.test_mod")
-            mod.__package__ = "mypkg2"
+            mod = types.ModuleType("po_absent_pkg.test_mod")
+            mod.__package__ = "po_absent_pkg"
             item = FakeItem(module=mod)
             assert MarkerResolver.has_package_parallel_only(item) is False
         finally:
-            del sys.modules["mypkg2"]
+            sys.modules.pop("po_absent_pkg", None)
 
     def test_handles_single_mark_not_in_list(self):
-        pkg_mod = types.ModuleType("mypkg3")
+        pkg_mod = types.ModuleType("po_single_pkg")
         pkg_mod.pytestmark = FakeMark("parallel_only")  # not wrapped in list
-        sys.modules["mypkg3"] = pkg_mod
+        sys.modules["po_single_pkg"] = pkg_mod
         try:
-            mod = types.ModuleType("mypkg3.test_mod")
-            mod.__package__ = "mypkg3"
+            mod = types.ModuleType("po_single_pkg.test_mod")
+            mod.__package__ = "po_single_pkg"
             item = FakeItem(module=mod)
             assert MarkerResolver.has_package_parallel_only(item) is True
         finally:
-            del sys.modules["mypkg3"]
+            sys.modules.pop("po_single_pkg", None)
 
 
 class TestParametrizeArgnames:

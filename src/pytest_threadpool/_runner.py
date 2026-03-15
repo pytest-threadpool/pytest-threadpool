@@ -7,8 +7,8 @@ from collections import OrderedDict
 
 from _pytest.runner import CallInfo, call_and_report, show_test_item
 
-from pytest_freethreaded._fixtures import FixtureManager
-from pytest_freethreaded._grouping import GroupKeyBuilder
+from pytest_threadpool._fixtures import FixtureManager
+from pytest_threadpool._grouping import GroupKeyBuilder
 
 # Test slot states
 _SCHEDULED = "scheduled"

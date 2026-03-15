@@ -1,11 +1,11 @@
-# pytest-freethreaded
+# pytest-threadpool
 
-[![PyPI](https://img.shields.io/pypi/v/pytest-freethreaded.svg)](https://pypi.org/project/pytest-freethreaded/)
-[![Python](https://img.shields.io/pypi/pyversions/pytest-freethreaded.svg)](https://pypi.org/project/pytest-freethreaded/)
-[![License](https://img.shields.io/github/license/pytest-freethreaded/pytest-freethreaded)](https://github.com/pytest-freethreaded/pytest-freethreaded/blob/main/LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-pytest--freethreaded-blue?logo=github)](https://github.com/pytest-freethreaded/pytest-freethreaded)
-[![CI](https://github.com/pytest-freethreaded/pytest-freethreaded/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-freethreaded/pytest-freethreaded/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/pytest-freethreaded/pytest-freethreaded/branch/main/graph/badge.svg)](https://codecov.io/gh/pytest-freethreaded/pytest-freethreaded)
+[![PyPI](https://img.shields.io/pypi/v/pytest-threadpool.svg)](https://pypi.org/project/pytest-threadpool/)
+[![Python](https://img.shields.io/pypi/pyversions/pytest-threadpool.svg)](https://pypi.org/project/pytest-threadpool/)
+[![License](https://img.shields.io/github/license/pytest-threadpool/pytest-threadpool)](https://github.com/pytest-threadpool/pytest-threadpool/blob/main/LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-pytest--threadpool-blue?logo=github)](https://github.com/pytest-threadpool/pytest-threadpool)
+[![CI](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml/badge.svg)](https://github.com/pytest-threadpool/pytest-threadpool/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pytest-threadpool/pytest-threadpool/branch/main/graph/badge.svg)](https://codecov.io/gh/pytest-threadpool/pytest-threadpool)
 
 Parallel test execution for free-threaded Python builds (3.13t+).
 
@@ -15,19 +15,19 @@ fixture setup/teardown sequential (pytest internals are not thread-safe).
 ## Installation
 
 ```bash
-pip install pytest-freethreaded
+pip install pytest-threadpool
 ```
 
 ## Quick start
 
 ```bash
-pytest --freethreaded auto
+pytest --threadpool auto
 ```
 
 Mark tests for parallel execution:
 
 ```python
-from pytest_freethreaded import parallelizable, not_parallelizable
+from pytest_threadpool import parallelizable, not_parallelizable
 
 import pytest
 
@@ -70,7 +70,7 @@ not_parallelizable > own marker > class > module > package
 ## Shared state between tests
 
 Unlike `pytest-xdist`, which uses subprocesses and requires all test data to
-be pickleable, `pytest-freethreaded` runs tests in threads within a **single
+be pickleable, `pytest-threadpool` runs tests in threads within a **single
 process**. This means tests can share common non-pickleable, thread-safe
 objects — both within a parallel group and across sequential groups:
 
@@ -118,10 +118,10 @@ serialization overhead or workarounds.
 
 ```bash
 # Auto-detect thread count
-pytest --freethreaded auto
+pytest --threadpool auto
 
 # Fixed thread count
-pytest --freethreaded 8
+pytest --threadpool 8
 
 # Normal sequential run (no flag)
 pytest

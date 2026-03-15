@@ -1,11 +1,11 @@
 """Group key computation for parallel test batching."""
 
-from pytest_freethreaded._constants import (
+from pytest_threadpool._constants import (
     SCOPE_NOT,
     ParallelScope,
     _GroupPrefix,
 )
-from pytest_freethreaded._markers import MarkerResolver
+from pytest_threadpool._markers import MarkerResolver
 
 
 class GroupKeyBuilder:

@@ -1,4 +1,4 @@
-"""No marker — class tests run sequentially even with --freethreaded."""
+"""No marker — class tests run sequentially even with --threadpool."""
 
 import time
 from typing import ClassVar
