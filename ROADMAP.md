@@ -30,6 +30,36 @@ then feed it back one item at a time during the sequential reporting phase.
 
 **Priority:** High — this is the most common friction point for adoption.
 
+## Harden FixtureDef cloning
+
+**Goal:** Make function-scoped fixture cloning more robust against pytest internals
+changes and more transparent to developers.
+
+**Current approach:** `clone_function_fixturedefs` uses `__new__` + `__dict__.update`
+for a shallow copy, then resets `cached_result` and `_finalizers`. This works because
+those are the only two fields mutated during fixture lifecycle — but it's fragile.
+
+**Improvements:**
+
+- **Deep-copy guard:** Validate at clone time that the only mutable fields are the
+  ones we reset. If a future pytest version adds mutable state to `FixtureDef`,
+  the clone should fail loudly (assertion or warning) rather than silently sharing
+  state across workers.
+
+- **Document fixture chain isolation:** When fixture A (function-scoped) depends on
+  fixture B (also function-scoped), both get cloned independently. Chain resolution
+  works because `_arg2fixturedefs` is replaced as a whole, so `getfixturevalue("B")`
+  hits B's clone. This is correct but non-obvious — add inline comments explaining
+  the chain resolution path through the cloned map.
+
+- **`object.__setattr__` on `_arg2fixturedefs`:** Currently bypasses the `Final`
+  typing annotation. If pytest ever enforces immutability at runtime (frozen
+  dataclass, `__slots__`), this breaks. Track whether upstream adds a setter or
+  public mutation API.
+
+**Priority:** Medium — current implementation works, but one pytest release could
+break it silently.
+
 ## Plugin compatibility testing
 
 Validate and document interactions with commonly used pytest plugins:
