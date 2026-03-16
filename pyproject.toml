@@ -21,6 +21,11 @@ dependencies = [
     "pytest>=9.0.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/pytest-threadpool/pytest-threadpool"
+Source = "https://github.com/pytest-threadpool/pytest-threadpool"
+Issues = "https://github.com/pytest-threadpool/pytest-threadpool/issues"
+
 [project.entry-points.pytest11]
 threadpool = "pytest_threadpool.plugin"
 
