@@ -69,6 +69,7 @@ ignore = ["tests/unit_tests", "src/pytest_threadpool/_version.py"]
 source = ["pytest_threadpool"]
 branch = true
 parallel = true
+relative_files = true
 
 [tool.coverage.paths]
 source = [
