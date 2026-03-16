@@ -6,6 +6,14 @@
 - Factory:        fresh RequestHandler every injection
 
 All providers are class attributes — use ``Container.config()`` etc. directly.
+
+.. note::
+
+   The `dependency-injector <https://github.com/ets-labs/python-dependency-injector>`_
+   library offers similar provider scopes, but its C-extension is not marked as
+   free-threaded safe.  On 3.13t+ builds Python will fall back to the GIL-enabled
+   interpreter when it is imported, negating the benefit of free-threaded execution.
+   This example uses pure-stdlib providers to avoid that limitation.
 """
 
 from examples.test_di.providers import ContextLocal, Factory, Singleton, ThreadLocal
