@@ -40,6 +40,15 @@ class GroupKeyBuilder:
             if own == ParallelScope.ALL:
                 child_parallel = True
                 param_parallel = True
+            elif own == ParallelScope.CHILDREN:
+                import warnings
+
+                warnings.warn(
+                    f"@parallelizable('children') on function {item.name!r} has no effect — "
+                    "functions have no children. Use 'parameters' or 'all' instead.",
+                    UserWarning,
+                    stacklevel=1,
+                )
             elif own == ParallelScope.PARAMETERS:
                 param_parallel = True
         elif item.cls and cls is not None:

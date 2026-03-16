@@ -8,6 +8,7 @@ from pytest_threadpool._constants import (
     MARKER_PARALLELIZABLE,
     PARALLEL_SCOPES,
     SCOPE_NOT,
+    ParallelScope,
 )
 
 
@@ -162,7 +163,3 @@ class MarkerResolver:
             and arg2scope.get(k, Scope.Function) is not Scope.Function
         }
         return tuple(sorted(fixture_params.items())) if fixture_params else ()
-
-
-# Import here to avoid circular; used only in scope_from_marks / own_scope
-from pytest_threadpool._constants import ParallelScope  # noqa: E402

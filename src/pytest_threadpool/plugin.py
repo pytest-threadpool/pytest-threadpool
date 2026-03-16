@@ -69,7 +69,10 @@ def _thread_count(config) -> int | None:
         return None
     if val == "auto":
         return os.cpu_count() or 4
-    return int(val)
+    try:
+        return int(val)
+    except ValueError:
+        raise pytest.UsageError(f"--threadpool: expected integer or 'auto', got {val!r}") from None
 
 
 def _is_free_threaded() -> bool:

@@ -741,6 +741,17 @@ class ParallelRunner:
                             lambda e=exc: (_ for _ in ()).throw(e),
                             when="call",
                         )
+                        # Ensure setup_reports/setup_passed are populated so
+                        # _report_item doesn't KeyError on unexpected exceptions.
+                        if work_item not in setup_reports:
+                            setup_info = CallInfo.from_call(
+                                lambda e=exc: (_ for _ in ()).throw(e),
+                                when="setup",
+                            )
+                            setup_reports[work_item] = work_item.ihook.pytest_runtest_makereport(
+                                item=work_item, call=setup_info
+                            )
+                            setup_passed[work_item] = False
                         result_queue.put((work_item, call_info))
                     finally:
                         if stdout_proxy is not None:
