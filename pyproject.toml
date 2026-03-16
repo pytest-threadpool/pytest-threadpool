@@ -53,7 +53,8 @@ version-file = "src/pytest_threadpool/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pytest_threadpool"]
 
-[tool.pytest.ini_options]
+[tool.pytest]
+minversion = "9.0"
 addopts = ["--threadpool", "auto"]
 norecursedirs = ["cases", "examples"]
 
