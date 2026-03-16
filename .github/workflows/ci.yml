@@ -34,15 +34,21 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv python install ${{ matrix.python }}
       - run: uv sync --python ${{ matrix.python }} --group dev
-      - name: Run tests with subprocess coverage
+      - name: Run tests
+        id: tests
+        env:
+          COVERAGE_PROCESS_START: pyproject.toml
+        run: uv run --python ${{ matrix.python }} coverage run -m pytest -v --tb=short
+      - name: Generate coverage report
+        if: always() && steps.tests.outcome != 'cancelled'
         env:
           COVERAGE_PROCESS_START: pyproject.toml
         run: |
-          uv run --python ${{ matrix.python }} coverage run -m pytest -v --tb=short
           uv run --python ${{ matrix.python }} coverage combine
           uv run --python ${{ matrix.python }} coverage xml
       - name: Upload coverage reports to Codecov
-        if: matrix.python == '3.14t'
+        if: always() && matrix.python == '3.14t' && steps.tests.outcome != 'cancelled'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
