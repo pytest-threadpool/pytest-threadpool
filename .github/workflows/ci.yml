@@ -45,6 +45,7 @@ jobs:
           uv run --python ${{ matrix.python }} coverage combine
           uv run --python ${{ matrix.python }} coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
           uv run --python ${{ matrix.python }} coverage xml
+          sed -i 's|<source></source>|<source>.</source>|' coverage.xml
       - name: Upload coverage reports to Codecov
         if: always() && matrix.python == '3.14t' && steps.tests.outcome != 'cancelled'
         uses: codecov/codecov-action@v5
