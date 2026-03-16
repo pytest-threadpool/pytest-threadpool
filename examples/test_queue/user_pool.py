@@ -17,10 +17,10 @@ class UserPoolMeta(type):
         return super().__new__(cls, *args, **kwargs)
 
     def get_user(cls):
-        return cls._user_pool.get()
+        return cls._user_pool.get(timeout=10)
 
     def release_user(cls, user):
-        cls._user_pool.put(user)
+        cls._user_pool.put(user, timeout=10)
 
 
 class UserPool(metaclass=UserPoolMeta): ...
