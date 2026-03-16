@@ -79,6 +79,13 @@ class TestSetupFailures:
         assert "2 passed" in result.stdout
         assert "1 error" in result.stdout
 
+    def test_first_item_setup_fails(self, ftdir):
+        """First item in parallel group fails setup — remaining items still run."""
+        ftdir.copy_case("edge_first_item_setup_fail")
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "1 error" in result.stdout
+        assert "3 passed" in result.stdout
+
 
 class TestExceptionHandling:
     """Verify BaseException subclasses are handled during parallel execution."""
@@ -129,8 +136,40 @@ class TestConcurrencyEdgeCases:
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
 
 
+class TestTeardownFailures:
+    """Verify correct handling when teardown raises in parallel groups."""
+
+    def test_teardown_exception_reported(self, ftdir):
+        """Teardown exception in one item is reported; other items still pass."""
+        ftdir.copy_case("edge_teardown_exception")
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "3 passed" in result.stdout or "4 passed" in result.stdout
+        assert "1 error" in result.stdout
+
+
+class TestMaxfail:
+    """Verify --maxfail stops execution across parallel groups."""
+
+    def test_maxfail_stops_after_n_failures(self, ftdir):
+        """--maxfail=1 stops execution after first failure in parallel group."""
+        ftdir.copy_case("edge_maxfail_parallel")
+        result = ftdir.run_pytest("--threadpool", "3", "--maxfail", "1")
+        assert result.returncode != 0
+        # Second group should not run at all
+        assert "test_d" not in result.stdout
+        assert "test_e" not in result.stdout
+
+    def test_maxfail_higher_than_failures(self, ftdir):
+        """--maxfail=10 allows all tests to run when fewer failures occur."""
+        ftdir.copy_case("edge_maxfail_parallel")
+        result = ftdir.run_pytest("--threadpool", "3", "--maxfail", "10")
+        assert result.returncode != 0
+        assert "3 failed" in result.stdout
+        assert "2 passed" in result.stdout
+
+
 class TestRunnerModes:
-    """Verify --collect-only, --setup-only, and single-worker modes with --threadpool."""
+    """Verify --collect-only, --setup-only, --setup-show, and single-worker modes."""
 
     def test_collect_only_with_threadpool(self, ftdir):
         """--collect-only with --threadpool lists tests without running them."""
@@ -153,6 +192,14 @@ class TestRunnerModes:
         # No "passed" or "failed" — test calls were skipped
         assert "passed" not in result.stdout
         assert "failed" not in result.stdout
+
+    def test_setup_show_with_threadpool(self, ftdir):
+        """--setup-show with --threadpool displays fixture setup info."""
+        ftdir.copy_case("runner_setup_show")
+        result = ftdir.run_pytest("--threadpool", "2", "--setup-show")
+        assert result.returncode == 0
+        assert "SETUP" in result.stdout
+        assert "resource" in result.stdout
 
     def test_single_worker_fallback(self, ftdir):
         """--threadpool 1 runs parallel-marked tests sequentially."""
