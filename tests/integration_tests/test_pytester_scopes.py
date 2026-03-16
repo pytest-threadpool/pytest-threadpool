@@ -59,3 +59,15 @@ class TestParallelScopes:
         ftdir.copy_case("scope_all_not_parallelizable")
         result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=4)
+
+    def test_two_classes_one_parallel_one_sequential(self, ftdir):
+        """Parallel and sequential classes coexist in the same module."""
+        ftdir.copy_case("scope_two_classes_mixed")
+        result = ftdir.run_pytest("--threadpool", "2")
+        result.assert_outcomes(passed=5)
+
+    def test_mixed_not_parallelizable_fail_and_skip(self, ftdir):
+        """not_parallelizable methods that fail or skip alongside parallel methods."""
+        ftdir.copy_case("scope_mixed_fail_skip")
+        result = ftdir.run_pytest("--threadpool", "2")
+        result.assert_outcomes(passed=3, failed=1, skipped=1)

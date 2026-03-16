@@ -248,6 +248,63 @@ class TestPackageScope:
         finally:
             sys.modules.pop("skipmissing_pkg", None)
 
+    def test_returns_none_when_no_markers_in_hierarchy(self):
+        """All packages exist but none have pytestmark — returns None."""
+        pkg_mod = types.ModuleType("nomarks_pkg")
+        sys.modules["nomarks_pkg"] = pkg_mod
+        try:
+            mod = types.ModuleType("nomarks_pkg.test_mod")
+            mod.__package__ = "nomarks_pkg"
+            item = FakeItem(module=mod)
+            assert MarkerResolver.package_scope(item) is None
+        finally:
+            sys.modules.pop("nomarks_pkg", None)
+
+
+class TestMarkerSourcePackage:
+    """Tests for MarkerResolver.marker_source_package."""
+
+    def test_returns_none_when_no_package(self):
+        mod = types.ModuleType("test_mod")
+        mod.__package__ = ""
+        item = FakeItem(module=mod)
+        assert MarkerResolver.marker_source_package(item) is None
+
+    def test_returns_package_name_when_found(self):
+        pkg_mod = types.ModuleType("srcpkg_found")
+        pkg_mod.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("children",))]
+        sys.modules["srcpkg_found"] = pkg_mod
+        try:
+            mod = types.ModuleType("srcpkg_found.test_mod")
+            mod.__package__ = "srcpkg_found"
+            item = FakeItem(module=mod)
+            assert MarkerResolver.marker_source_package(item) == "srcpkg_found"
+        finally:
+            sys.modules.pop("srcpkg_found", None)
+
+    def test_skips_missing_modules(self):
+        parent = types.ModuleType("srcpkg_skip_parent")
+        parent.pytestmark = [FakeMark(MARKER_PARALLELIZABLE, ("all",))]
+        sys.modules["srcpkg_skip_parent"] = parent
+        try:
+            mod = types.ModuleType("srcpkg_skip_parent.sub.test_mod")
+            mod.__package__ = "srcpkg_skip_parent.sub"
+            item = FakeItem(module=mod)
+            assert MarkerResolver.marker_source_package(item) == "srcpkg_skip_parent"
+        finally:
+            sys.modules.pop("srcpkg_skip_parent", None)
+
+    def test_returns_none_when_no_markers_in_hierarchy(self):
+        pkg_mod = types.ModuleType("srcpkg_nomarks")
+        sys.modules["srcpkg_nomarks"] = pkg_mod
+        try:
+            mod = types.ModuleType("srcpkg_nomarks.test_mod")
+            mod.__package__ = "srcpkg_nomarks"
+            item = FakeItem(module=mod)
+            assert MarkerResolver.marker_source_package(item) is None
+        finally:
+            sys.modules.pop("srcpkg_nomarks", None)
+
 
 class TestHasPackageParallelOnly:
     """Tests for MarkerResolver.has_package_parallel_only."""
@@ -293,6 +350,19 @@ class TestHasPackageParallelOnly:
             assert MarkerResolver.has_package_parallel_only(item) is True
         finally:
             sys.modules.pop("po_single_pkg", None)
+
+    def test_skips_missing_modules(self):
+        """When a package part isn't in sys.modules, it's skipped."""
+        parent = types.ModuleType("po_skipmissing")
+        parent.pytestmark = [FakeMark("parallel_only")]
+        sys.modules["po_skipmissing"] = parent
+        try:
+            mod = types.ModuleType("po_skipmissing.sub.test_mod")
+            mod.__package__ = "po_skipmissing.sub"
+            item = FakeItem(module=mod)
+            assert MarkerResolver.has_package_parallel_only(item) is True
+        finally:
+            sys.modules.pop("po_skipmissing", None)
 
 
 class TestParametrizeArgnames:

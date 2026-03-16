@@ -122,6 +122,24 @@ class TestGroupKeyParameters:
         assert key is not None
         assert key[0] == _GroupPrefix.PARAMS
 
+    def test_parameters_with_fixture_param_key(self):
+        """Parameters scope includes fixture_param_key when broader-scoped fixture params exist."""
+        from _pytest.scope import Scope
+
+        item = _make_item(
+            own_markers=[FakeMark(MARKER_PARALLELIZABLE, ("parameters",))],
+            callspec=types.SimpleNamespace(
+                params={"x": 1, "fix": "v1"},
+                _arg2scope={"x": Scope.Function, "fix": Scope.Class},
+            ),
+            originalname="test_fp",
+        )
+        item.iter_markers = lambda name: []
+        key = GroupKeyBuilder.group_key(item)
+        assert key is not None
+        assert key[0] == _GroupPrefix.PARAMS
+        assert key[-1] == (("fix", "v1"),)
+
 
 class TestGroupKeyModuleLevel:
     """Module-level markers produce module or class keys."""

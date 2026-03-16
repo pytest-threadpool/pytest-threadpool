@@ -129,6 +129,44 @@ class TestConcurrencyEdgeCases:
         assert "KeyboardInterrupt" in stdout or "KeyboardInterrupt" in stderr
 
 
+class TestRunnerModes:
+    """Verify --collect-only, --setup-only, and single-worker modes with --threadpool."""
+
+    def test_collect_only_with_threadpool(self, ftdir):
+        """--collect-only with --threadpool lists tests without running them."""
+        ftdir.copy_case("runner_collect_only")
+        result = ftdir.run_pytest("--threadpool", "2", "--collect-only")
+        assert result.returncode == 0
+        assert "test_a" in result.stdout
+        assert "test_b" in result.stdout
+        # No "passed" or "failed" — tests were not executed
+        assert "passed" not in result.stdout
+        assert "failed" not in result.stdout
+
+    def test_setup_only_with_threadpool(self, ftdir):
+        """--setup-only with --threadpool runs setup/teardown without calling tests."""
+        ftdir.copy_case("runner_setup_only")
+        result = ftdir.run_pytest("--threadpool", "2", "--setup-only")
+        assert result.returncode == 0
+        assert "SETUP" in result.stdout
+        assert "TEARDOWN" in result.stdout
+        # No "passed" or "failed" — test calls were skipped
+        assert "passed" not in result.stdout
+        assert "failed" not in result.stdout
+
+    def test_single_worker_fallback(self, ftdir):
+        """--threadpool 1 runs parallel-marked tests sequentially."""
+        ftdir.copy_case("runner_single_worker")
+        result = ftdir.run_pytest("--threadpool", "1")
+        result.assert_outcomes(passed=4)
+
+    def test_single_parallel_item_after_skip(self, ftdir):
+        """Skip reduces parallel group to one item, using single-worker fallback."""
+        ftdir.copy_case("runner_single_parallel_item")
+        result = ftdir.run_pytest("--threadpool", "2")
+        result.assert_outcomes(passed=2, skipped=1)
+
+
 class TestCrossModuleParallelGroup:
     """Verify cross-module parallel groups complete without hanging."""
 

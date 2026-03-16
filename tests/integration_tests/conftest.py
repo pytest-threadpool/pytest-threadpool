@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 CASES_DIR = Path(__file__).parent / "cases"
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+PYPROJECT_TOML = str(PROJECT_ROOT / "pyproject.toml")
 
 
 class RunResult:
@@ -86,6 +88,24 @@ class FreethreadedTestDir:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    @staticmethod
+    def _coverage_env():
+        """Build env dict for subprocess coverage collection.
+
+        When the outer test suite is running under coverage (COVERAGE_PROCESS_START
+        is set, or pytest-cov is active), propagate the setting so the child
+        subprocess writes its own .coverage data file.  COVERAGE_FILE is set
+        to the project root so all parallel data files land in one directory.
+        """
+        env = os.environ.copy()
+        if os.getenv("COVERAGE_PROCESS_START"):
+            # Resolve to absolute path so subprocess finds config from its cwd
+            env["COVERAGE_PROCESS_START"] = str(
+                Path(os.environ["COVERAGE_PROCESS_START"]).resolve()
+            )
+            env.setdefault("COVERAGE_FILE", str(PROJECT_ROOT / ".coverage"))
+        return env
+
     def run_pytest(self, *extra_args, timeout=30):
         """Run pytest in a subprocess (piped, non-TTY)."""
         args = [
@@ -103,6 +123,7 @@ class FreethreadedTestDir:
             text=True,
             timeout=timeout,
             cwd=str(self.path),
+            env=self._coverage_env(),
         )
         return RunResult(result.stdout, result.stderr, result.returncode)
 
@@ -124,7 +145,7 @@ class FreethreadedTestDir:
             *extra_args,
         ]
         master_fd, slave_fd = pty.openpty()
-        env = os.environ.copy()
+        env = self._coverage_env()
         env["TERM"] = "xterm-256color"
         env["COLUMNS"] = "120"
         proc = subprocess.Popen(

@@ -33,3 +33,15 @@ class TestXunitUnderParallel:
         ftdir.copy_case("xunit_function_setup")
         result = ftdir.run_pytest("--threadpool", "auto")
         result.assert_outcomes(passed=3)
+
+    def test_method_setup_mixed_parallel(self, ftdir):
+        """setup_method/teardown_method run for both parallel and not_parallelizable methods."""
+        ftdir.copy_case("xunit_method_mixed_parallel")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)
+
+    def test_function_setup_mixed_parallel(self, ftdir):
+        """setup_function/teardown_function run for both parallel and sequential functions."""
+        ftdir.copy_case("xunit_function_mixed_parallel")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)

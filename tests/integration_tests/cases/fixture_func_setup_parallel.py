@@ -7,45 +7,42 @@ from typing import ClassVar
 import pytest
 
 
+class TestState:
+    setup_starts: ClassVar[list] = []
+    lock: ClassVar[threading.Lock] = threading.Lock()
+
+
 @pytest.fixture
 def slow_resource(request):
-    """Each setup takes 0.2s; if sequential that's 0.6s total, parallel < 0.4s."""
-    time.sleep(0.2)
+    """Each setup takes 0.3s; record start time to prove overlap."""
+    start = time.monotonic()
+    with TestState.lock:
+        TestState.setup_starts.append(start)
+    time.sleep(0.3)
     return request.node.name
 
 
 @pytest.mark.parallelizable("children")
 class TestFixtureSetupParallel:
     barrier = threading.Barrier(3, timeout=10)
-    start_time: ClassVar[float | None] = None
-    end_times: ClassVar[list] = []
-    lock: ClassVar[threading.Lock] = threading.Lock()
 
     def test_a(self, slow_resource):
         self.barrier.wait()
-        with self.lock:
-            self.end_times.append(time.monotonic())
 
     def test_b(self, slow_resource):
         self.barrier.wait()
-        with self.lock:
-            self.end_times.append(time.monotonic())
 
     def test_c(self, slow_resource):
         self.barrier.wait()
-        with self.lock:
-            self.end_times.append(time.monotonic())
-
-
-TestFixtureSetupParallel.start_time = time.monotonic()
 
 
 def test_verify():
-    # All 3 tests completed — the barrier proves concurrency of the test calls.
-    # The fixture setup (0.2s each) ran in parallel, so total wall time
-    # should be well under 0.6s (the sequential total).
-    elapsed = max(TestFixtureSetupParallel.end_times) - TestFixtureSetupParallel.start_time
-    assert elapsed < 0.5, (
-        f"Fixture setup appears sequential: {elapsed:.2f}s elapsed "
-        f"(3 x 0.2s = 0.6s sequential, expected < 0.5s parallel)"
+    # If setups ran in parallel, all 3 start times are close together.
+    # If sequential, they'd be ~0.3s apart.
+    # Check that the spread (max - min) is well below a single sleep duration.
+    assert len(TestState.setup_starts) == 3
+    spread = max(TestState.setup_starts) - min(TestState.setup_starts)
+    assert spread < 0.2, (
+        f"Fixture setup appears sequential: start time spread is {spread:.3f}s "
+        f"(expected < 0.2s for parallel, ~0.6s for sequential)"
     )

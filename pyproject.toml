@@ -65,6 +65,32 @@ typeCheckingMode = "standard"
 reportPrivateUsage = false
 ignore = ["tests/unit_tests", "src/pytest_threadpool/_version.py"]
 
+[tool.coverage.run]
+source = ["pytest_threadpool"]
+branch = true
+parallel = true
+
+[tool.coverage.paths]
+source = [
+    "src/pytest_threadpool",
+    "**/site-packages/pytest_threadpool",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "class \\w+\\(Protocol\\):",
+    "@overload",
+    "pragma: no cover",
+    "raise KeyboardInterrupt",
+    "except KeyboardInterrupt:",
+    "except BaseException",
+    "raise BaseExceptionGroup",
+]
+omit = [
+    "src/pytest_threadpool/_version.py",
+]
+
 [tool.ruff]
 target-version = "py313"
 exclude = ["src/pytest_threadpool/_version.py"]

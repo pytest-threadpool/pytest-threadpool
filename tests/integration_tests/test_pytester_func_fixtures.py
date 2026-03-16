@@ -89,3 +89,9 @@ class TestXunitTeardownParallel:
         ftdir.copy_case("xunit_method_teardown_runs")
         result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=4)
+
+    def test_fixture_with_mixed_parallel_methods(self, ftdir):
+        """Function fixtures work for both parallel and not_parallelizable methods."""
+        ftdir.copy_case("fixture_func_mixed_parallel")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)
