@@ -73,9 +73,9 @@ class TestThreadLocalStream:
         t1 = threading.Thread(target=worker, args=("t1", True))
         t2 = threading.Thread(target=worker, args=("t2", False))
         t1.start()
-        t1.join()
+        t1.join(timeout=10)
         t2.start()
-        t2.join()
+        t2.join(timeout=10)
 
         # t1 was activated so its write went to buffer, t2 passed through
         assert "t2" in real.getvalue()
@@ -85,7 +85,7 @@ class TestThreadLocalStream:
         """Multiple threads activated concurrently don't cross-contaminate."""
         real = io.StringIO()
         proxy = _ThreadLocalStream(real)
-        barrier = threading.Barrier(3)
+        barrier = threading.Barrier(3, timeout=10)
         buffers = {}
 
         def worker(name):
@@ -102,7 +102,7 @@ class TestThreadLocalStream:
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=10)
 
         # Each thread should only see its own data
         for i in range(3):

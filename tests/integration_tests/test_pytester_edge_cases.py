@@ -30,7 +30,7 @@ def _run_and_sigint(ftdir, *, threads="3"):
     while not ready_path.exists():
         if time.monotonic() > deadline:
             proc.kill()
-            proc.wait()
+            proc.wait(timeout=5)
             raise AssertionError("Subprocess did not reach test body within 10s")
         time.sleep(0.05)
     proc.send_signal(signal.SIGINT)
@@ -38,7 +38,7 @@ def _run_and_sigint(ftdir, *, threads="3"):
         stdout, stderr = proc.communicate(timeout=10)
     except subprocess.TimeoutExpired as exc:
         proc.kill()
-        proc.wait()
+        proc.wait(timeout=5)
         raise AssertionError(
             "Process did not exit within 10s after SIGINT — futures were not cancelled promptly"
         ) from exc

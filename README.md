@@ -171,6 +171,7 @@ pytest
 The [`examples/`](examples/) directory contains runnable usage patterns:
 
 - **DI container** — dependency injection with Singleton, ThreadLocal, ContextLocal, and Factory scopes
+- **Event bus** — shared in-memory test double with concurrent producers and aggregate verification
 - **Parallel logging** — shared thread-safe log collector (caplog alternative)
 - **Shared state** — barriers, atomic counters, and cross-group coordination
 - **User pool** — custom thread pool with LIFO queue recycling
