@@ -160,6 +160,19 @@ pytest
 > **Note:** On standard (GIL-enabled) builds, the GIL limits parallel speedup
 > for CPU-bound tests. I/O-bound tests still run concurrently.
 
+## Examples
+
+The [`examples/`](examples/) directory contains runnable usage patterns:
+
+- **DI container** — dependency injection with Singleton, ThreadLocal, ContextLocal, and Factory scopes
+- **Parallel logging** — thread-safe alternatives to `caplog` (file handlers, shared collectors)
+- **Shared state** — barriers, atomic counters, and cross-group coordination
+- **User pool** — custom thread pool with LIFO queue recycling
+
+The [`tests/integration_tests/cases/`](tests/integration_tests/cases/) and
+[`tests/integration_tests/`](tests/integration_tests/) directories are also
+worth browsing for real-world grouping, fixture, and reporting scenarios.
+
 ## Known limitations
 
 - **Private pytest API usage** — The plugin relies on internal `_pytest` APIs
