@@ -127,9 +127,6 @@ src/pytest_threadpool/
     _runner.py        # ParallelRunner: parallel execution orchestration
     plugin.py         # pytest hook implementations (wiring only)
 
-hooks/
-    pre-commit        # Git pre-commit hook (ruff + pyright)
-
 scripts/
     setup-dev         # One-command dev environment setup
 ```

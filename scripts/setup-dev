@@ -10,6 +10,6 @@ uv python install "$PYTHON"
 uv sync --python "$PYTHON" --group dev
 
 echo "Installing pre-commit hook..."
-install -m 755 hooks/pre-commit .git/hooks/pre-commit
+uv run pre-commit install
 
 echo "Done. Pre-commit hook will run ruff format, ruff check, and pyright on each commit."
