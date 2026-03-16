@@ -171,7 +171,7 @@ pytest
 The [`examples/`](examples/) directory contains runnable usage patterns:
 
 - **DI container** — dependency injection with Singleton, ThreadLocal, ContextLocal, and Factory scopes
-- **Parallel logging** — thread-safe alternatives to `caplog` (file handlers, shared collectors)
+- **Parallel logging** — shared thread-safe log collector (caplog alternative)
 - **Shared state** — barriers, atomic counters, and cross-group coordination
 - **User pool** — custom thread pool with LIFO queue recycling
 
@@ -187,9 +187,17 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
 - **No plugin compatibility guarantees** — Interactions with other pytest
   plugins (e.g. `pytest-xdist`, `pytest-timeout`, `pytest-randomly`) are
   untested and may conflict.
-- **No captured stdout in parallel** — Standard output from tests running
-  concurrently is written directly to the terminal. Pytest's built-in capture
-  (`capsys`/`capfd`) is not supported during parallel execution.
+- **No `capsys`/`capfd`/`caplog` in parallel** — These fixtures are not
+  thread-safe. `capsys`/`capfd` fail with "cannot use capsys and capsys at
+  the same time" when requested by parallel tests. `caplog` leaks records
+  across fixtures and its `at_level()` context managers race on the shared
+  root logger. Alternatives:
+  - **`print()`** — Worker output is suppressed by default (buffered by
+    thread-local stream proxies). Pass `-s` (`--capture=no`) to disable
+    suppression and see interleaved output.
+  - **Logging** — Use a per-test `FileHandler` writing to `tmp_path`, or
+    collect structured records in a shared thread-safe list (see
+    [`examples/test_logging/`](examples/test_logging/)).
 
 ## License
 
