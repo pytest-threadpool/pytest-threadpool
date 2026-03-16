@@ -41,10 +41,9 @@ jobs:
         run: uv run --python ${{ matrix.python }} coverage run -m pytest -v --tb=short
       - name: Generate coverage report
         if: always() && steps.tests.outcome != 'cancelled'
-        env:
-          COVERAGE_PROCESS_START: pyproject.toml
         run: |
           uv run --python ${{ matrix.python }} coverage combine
+          uv run --python ${{ matrix.python }} coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
           uv run --python ${{ matrix.python }} coverage xml
       - name: Upload coverage reports to Codecov
         if: always() && matrix.python == '3.14t' && steps.tests.outcome != 'cancelled'
@@ -52,3 +51,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
+          fail_ci_if_error: true
+          verbose: true
