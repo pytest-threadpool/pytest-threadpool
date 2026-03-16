@@ -47,7 +47,7 @@ packages = ["src/pytest_threadpool"]
 
 [tool.pytest.ini_options]
 addopts = ["--threadpool", "auto"]
-norecursedirs = ["cases"]
+norecursedirs = ["cases", "examples"]
 
 [tool.pyright]
 pythonVersion = "3.13"
