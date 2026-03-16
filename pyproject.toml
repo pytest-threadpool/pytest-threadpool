@@ -3,14 +3,14 @@ name = "pytest-threadpool"
 dynamic = ["version"]
 description = "Parallel test execution for free-threaded Python builds"
 requires-python = ">=3.13"
-license = "MIT"
+license = "Apache-2.0"
 readme = "README.md"
 keywords = ["pytest", "parallel", "free-threaded", "nogil", "testing", "threadpool", "pytest parallel"]
 classifiers = [
     "Framework :: Pytest",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "pytest>=9.0.2",
+    "pytest>=9.0.0,<=9.0.2",
 ]
 
 [project.urls]
@@ -37,7 +37,6 @@ dev = [
 ]
 
 examples = [
-    "selenium>=4.41.0",
 ]
 
 [build-system]

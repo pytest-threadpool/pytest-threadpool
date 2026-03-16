@@ -36,22 +36,28 @@ from pytest_threadpool import parallelizable, not_parallelizable
 
 import pytest
 
-@parallelizable("children")     # all nested tests run in parallel
-class TestMyFeature:
-    def test_a(self): ...
-    def test_b(self): ...
 
-@parallelizable("parameters")   # parametrized variants run in parallel
+@parallelizable("children")  # all nested tests run in parallel
+class TestMyFeature:
+  def test_a(self): ...
+
+  def test_b(self): ...
+
+
+@parallelizable("parameters")  # parametrized variants run in parallel
 @pytest.mark.parametrize("x", [1, 2, 3])
 def test_with_params(x): ...
 
-@parallelizable("all")          # children + parameters combined
-class TestEverything:
-    @pytest.mark.parametrize("n", [1, 2])
-    def test_param(self, n): ...
-    def test_plain(self): ...
 
-@not_parallelizable             # opt out of inherited parallelism
+@parallelizable("all")  # children + parameters combined
+class TestEverything:
+  @pytest.mark.parametrize("n", [1, 2])
+  def test_param(self, n): ...
+
+  def test_plain(self): ...
+
+
+@not_parallelizable  # opt out of inherited parallelism
 def test_must_be_sequential(): ...
 ```
 
@@ -72,8 +78,8 @@ state between concurrent fixture setups.
 Shared fixtures (module, class, and session scope) are resolved once
 sequentially before workers launch and served from cache to all items.
 
-| Scope      | Behavior                                        |
-|------------|-------------------------------------------------|
+| Scope      | Behavior                                                |
+|------------|---------------------------------------------------------|
 | `function` | Cloned per-item, setup and teardown in parallel workers |
 | `class`    | Resolved once, cached, shared across items              |
 | `module`   | Resolved once, cached, shared across items              |
@@ -103,33 +109,33 @@ import pytest
 
 
 class SharedState:
-    lock = threading.Lock()          # not pickleable
-    event = threading.Event()        # not pickleable
-    results = {}
+  lock = threading.Lock()  # not pickleable
+  event = threading.Event()  # not pickleable
+  results = {}
 
 
 @pytest.mark.parallelizable("children")
 class TestGroupA:
-    def test_a1(self):
-        with SharedState.lock:
-            SharedState.results["a1"] = True
+  def test_a1(self):
+    with SharedState.lock:
+      SharedState.results["a1"] = True
 
-    def test_a2(self):
-        with SharedState.lock:
-            SharedState.results["a2"] = True
+  def test_a2(self):
+    with SharedState.lock:
+      SharedState.results["a2"] = True
 
 
 @pytest.mark.parallelizable("children")
 class TestGroupB:
-    def test_b1(self):
-        SharedState.event.set()
-        with SharedState.lock:
-            SharedState.results["b1"] = True
+  def test_b1(self):
+    SharedState.event.set()
+    with SharedState.lock:
+      SharedState.results["b1"] = True
 
-    def test_b2(self):
-        assert SharedState.event.wait(timeout=10)
-        with SharedState.lock:
-            SharedState.results["b2"] = True
+  def test_b2(self):
+    assert SharedState.event.wait(timeout=10)
+    with SharedState.lock:
+      SharedState.results["b2"] = True
 ```
 
 Objects like `threading.Lock`, `threading.Event`, `logging.Logger`, database
@@ -152,10 +158,10 @@ pytest
 
 ## Tested versions
 
-| Component | Versions |
-|-----------|----------|
+| Component | Versions                              |
+|-----------|---------------------------------------|
 | Python    | 3.13, 3.13t, 3.14, 3.14t, 3.15, 3.15t |
-| pytest    | >=9.0.2 |
+| pytest    | 9.0.2                                 |
 
 > **Note:** On standard (GIL-enabled) builds, the GIL limits parallel speedup
 > for CPU-bound tests. I/O-bound tests still run concurrently.
@@ -187,4 +193,4 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
 
 ## License
 
-MIT
+[Apache 2.0](LICENSE)
