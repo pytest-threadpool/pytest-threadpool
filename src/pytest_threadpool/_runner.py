@@ -355,7 +355,7 @@ class ParallelRunner:
             k is not None and len(gi) > 1 and self._nthreads > 1 for k, gi in groups
         )
 
-        had_sequential = False
+        needs_sep = False
         for group_key, items in groups:
             if session.shouldfail:
                 raise session.Failed(session.shouldfail)
@@ -369,10 +369,10 @@ class ParallelRunner:
                         self._run_sequential_nodeid(item, nextitem)
                     else:
                         self._run_sequential(item, nextitem)
-                had_sequential = bool(items)
+                needs_sep = bool(items)
             else:
-                self._run_parallel(items, after_sequential=had_sequential)
-                had_sequential = False
+                self._run_parallel(items, after_sequential=needs_sep)
+                needs_sep = True
 
         return True
 
@@ -697,13 +697,16 @@ class ParallelRunner:
 
         teardown_infos = {}
 
-        # In live mode, install thread-local stream proxies so worker
-        # print() output doesn't corrupt ANSI cursor positioning.
+        # Install thread-local stream proxies so worker print() output
+        # doesn't corrupt test result lines.  In live mode this prevents
+        # ANSI cursor corruption; in verbose/dumb mode it prevents
+        # interleaved output on the same line as test results.
         # Each worker activates its own buffer; the main thread and
-        # live reporter writes pass through to the real streams.
+        # reporter writes pass through to the real streams.
         stdout_proxy: _ThreadLocalStream | None = None
         stderr_proxy: _ThreadLocalStream | None = None
-        if live.live:
+        capture_option = session.config.getoption("capture", "fd")
+        if workers > 1 and len(parallel_items) > 1 and capture_option != "no":
             stdout_proxy = _ThreadLocalStream(sys.stdout)
             stderr_proxy = _ThreadLocalStream(sys.stderr)
             sys.stdout = stdout_proxy  # type: ignore[assignment]
