@@ -32,6 +32,27 @@ class TestThreadCount:
         config = types.SimpleNamespace(getoption=lambda key: "1")
         assert _thread_count(config) == 1
 
+    def test_non_numeric_raises_usage_error(self):
+        import pytest
+
+        config = types.SimpleNamespace(getoption=lambda key: "foo")
+        with pytest.raises(pytest.UsageError, match="expected integer or 'auto'"):
+            _thread_count(config)
+
+    def test_empty_string_raises_usage_error(self):
+        import pytest
+
+        config = types.SimpleNamespace(getoption=lambda key: "")
+        with pytest.raises(pytest.UsageError):
+            _thread_count(config)
+
+    def test_float_string_raises_usage_error(self):
+        import pytest
+
+        config = types.SimpleNamespace(getoption=lambda key: "3.5")
+        with pytest.raises(pytest.UsageError):
+            _thread_count(config)
+
 
 class TestIsFreeThreaded:
     """Tests for _is_free_threaded helper."""

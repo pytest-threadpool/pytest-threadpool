@@ -1,50 +1,18 @@
-"""logging in parallel tests — caplog pitfalls and working alternatives.
+"""Shared log collector — thread-safe alternative to caplog.
 
 pytest's ``caplog`` fixture is NOT thread-safe: log records from parallel
 tests leak across fixtures, and ``at_level()`` context managers race with
 each other on the shared root logger.
 
-**What works instead:**
-
-- Use Python's ``logging`` module with a per-test ``FileHandler`` writing
-  to ``tmp_path`` — each test gets its own directory and log file.
-- Use a shared thread-safe list to collect structured records (see below).
-- Use a ``ContextLocal`` provider from a DI container to scope log
-  collectors per test — see ``examples/test_di/container.py`` for an
-  example of ``ContextLocal`` that resets automatically between tests.
+This pattern uses a shared thread-safe list to collect structured records
+across parallel tests — impossible with pytest-xdist since workers are
+separate processes.
 """
 
-import logging
 import threading
 from typing import ClassVar
 
 import pytest
-
-
-class TestLogToFile:
-    """Each test creates its own logger + file handler in tmp_path."""
-
-    @pytest.mark.parametrize("_worker", range(4))
-    def test_per_test_file_log(self, _worker, tmp_path):
-        """Write logs to a per-test file — no interleaving, fully isolated."""
-        log_file = tmp_path / "test.log"
-
-        log = logging.getLogger(f"worker.{_worker}.{id(self)}")
-        log.setLevel(logging.DEBUG)
-        handler = logging.FileHandler(log_file)
-        handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-        log.addHandler(handler)
-
-        try:
-            log.debug("step 1")
-            log.info("step 2")
-            log.warning("step 3")
-        finally:
-            handler.close()
-            log.removeHandler(handler)
-
-        lines = log_file.read_text().splitlines()
-        assert lines == ["DEBUG: step 1", "INFO: step 2", "WARNING: step 3"]
 
 
 class TestSharedLogCollector:

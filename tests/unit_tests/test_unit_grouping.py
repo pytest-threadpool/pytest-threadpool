@@ -25,6 +25,7 @@ def _make_item(
     mod_marks=None,
     callspec=None,
     originalname="test_func",
+    name="test_func",
 ):
     """Build a fake item with the fields GroupKeyBuilder reads."""
     mod = types.ModuleType("fake_mod")
@@ -40,6 +41,7 @@ def _make_item(
         cls=cls,
         module=mod,
         originalname=originalname,
+        name=name,
         iter_markers=lambda name: [],
     )
     if callspec is not None:
@@ -71,6 +73,41 @@ class TestGroupKeySequential:
             cls_marks=[FakeMark(MARKER_PARALLELIZABLE, ("children",))],
         )
         assert GroupKeyBuilder.group_key(item) is None
+
+
+class TestGroupKeyChildrenOnFunction:
+    """@parallelizable('children') on a standalone function warns and returns None."""
+
+    def test_children_on_function_returns_none(self):
+        import warnings
+
+        item = _make_item(
+            own_markers=[FakeMark(MARKER_PARALLELIZABLE, ("children",))],
+            name="test_lonely",
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            key = GroupKeyBuilder.group_key(item)
+        assert key is None
+        assert len(w) == 1
+        assert "test_lonely" in str(w[0].message)
+        assert "children" in str(w[0].message)
+
+    def test_children_on_class_method_warns(self):
+        """Even on a class method, own 'children' marker warns (children is for containers)."""
+        import warnings
+
+        cls = type("C", (), {})
+        item = _make_item(
+            own_markers=[FakeMark(MARKER_PARALLELIZABLE, ("children",))],
+            cls=cls,
+            name="test_in_class",
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            key = GroupKeyBuilder.group_key(item)
+        assert key is None
+        assert len(w) == 1
 
 
 class TestGroupKeyClassChildren:

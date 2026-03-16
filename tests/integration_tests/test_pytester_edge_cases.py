@@ -62,6 +62,64 @@ class TestFreethreadedValidation:
         assert "GIL limits parallel speedup" in output
 
 
+class TestWorkerUnexpectedException:
+    """BUG-1: Unexpected exception in worker should not crash with KeyError."""
+
+    def test_worker_exception_reports_gracefully(self, ftdir):
+        """When a worker throws during makereport, the run completes without KeyError."""
+        shutil.copy2(
+            CASES_DIR / "edge_worker_exception.py",
+            ftdir.path / "test_case.py",
+        )
+        shutil.copy2(
+            CASES_DIR / "edge_worker_exception_conftest.py",
+            ftdir.path / "conftest.py",
+        )
+        result = ftdir.run_pytest("--threadpool", "3")
+        # The run must not crash with KeyError — it should report errors/failures
+        assert "KeyError" not in result.stdout
+        assert "KeyError" not in result.stderr
+        # At least some tests should be accounted for
+        assert result.returncode != 0 or "passed" in result.stdout
+
+
+class TestChildrenOnFunction:
+    """BUG-2: @parallelizable('children') on a function should warn."""
+
+    def test_children_on_function_warns(self, ftdir):
+        """A standalone function with @parallelizable('children') emits a warning."""
+        shutil.copy2(
+            CASES_DIR / "scope_children_on_function.py",
+            ftdir.path / "test_case.py",
+        )
+        result = ftdir.run_pytest("--threadpool", "2", "-W", "all")
+        result.assert_outcomes(passed=2)
+        output = result.stdout + result.stderr
+        assert "has no effect" in output or "no children" in output.lower()
+
+
+class TestInvalidThreadpoolOption:
+    """BUG-3: Non-numeric --threadpool value should give a clean error."""
+
+    def test_non_numeric_threadpool_gives_usage_error(self, ftdir):
+        """--threadpool=foo produces a pytest UsageError, not a raw traceback."""
+        ftdir.makepyfile("def test_x(): pass")
+        result = ftdir.run_pytest("--threadpool", "foo")
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "expected integer or 'auto'" in output
+        # Should NOT have a raw ValueError traceback
+        assert "ValueError" not in output
+
+    def test_float_threadpool_gives_usage_error(self, ftdir):
+        """--threadpool=3.5 produces a pytest UsageError."""
+        ftdir.makepyfile("def test_x(): pass")
+        result = ftdir.run_pytest("--threadpool", "3.5")
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "expected integer or 'auto'" in output
+
+
 class TestSetupFailures:
     """Verify correct handling when test setup fails in parallel groups."""
 
