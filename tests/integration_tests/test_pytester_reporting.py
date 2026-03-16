@@ -233,6 +233,38 @@ def _strip_ansi(text):
 _RESULT_LINE_RE = re.compile(r"test_[ab]\.py\s+[.Fs]+")
 
 
+def _setup_mixed_groups(ftdir):
+    """Create a layout with parallel → sequential → parallel groups.
+
+    Package ``mixpkg`` has children scope with a @not_parallelizable verify
+    test.  A second unrelated parallel class follows.  This exercises the
+    sequential-between-parallel-groups transition.
+    """
+    pkg = ftdir.mkdir("mixpkg")
+    pkg.joinpath("__init__.py").write_text(
+        'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
+    )
+    pkg.joinpath("test_par.py").write_text(
+        "import pytest\n\n"
+        "class TestPar:\n"
+        "    def test_a(self): pass\n"
+        "    def test_b(self): pass\n\n"
+        "@pytest.mark.not_parallelizable\n"
+        "def test_verify(): pass\n"
+    )
+    ftdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.mark.parallelizable("children")
+        class TestSecond:
+            def test_c(self): pass
+            def test_d(self): pass
+        """,
+        name="test_second",
+    )
+
+
 class TestDumbMode:
     """Verify output in dumb/pipe mode (non-TTY subprocess)."""
 
@@ -276,6 +308,31 @@ class TestDumbMode:
         for line in file_lines:
             assert re.search(r"\[\s*\d+%\]", line), f"Missing progress on file line: {line!r}"
 
+    def test_sequential_shows_nodeid(self, ftdir):
+        """Sequential tests between parallel groups display file::test format in dumb mode."""
+        _setup_mixed_groups(ftdir)
+        result = ftdir.run_pytest("--threadpool", "4")
+        result.assert_outcomes(passed=5)
+
+        nodeid_lines = [line for line in result.outlines if "::test_verify" in line]
+        assert nodeid_lines, (
+            "Sequential test_verify not shown in nodeid format.\nstdout:\n" + result.stdout
+        )
+        assert any("PASSED" in line for line in nodeid_lines), (
+            f"Nodeid line missing PASSED: {nodeid_lines}\nstdout:\n{result.stdout}"
+        )
+
+    def test_sequential_between_groups_not_lost(self, ftdir):
+        """Sequential tests between parallel groups all appear in output."""
+        _setup_mixed_groups(ftdir)
+        result = ftdir.run_pytest("--threadpool", "4")
+        result.assert_outcomes(passed=5)
+
+        verify_lines = [line for line in result.outlines if "test_verify" in line]
+        assert verify_lines, (
+            "test_verify missing from dumb mode output.\nstdout:\n" + result.stdout
+        )
+
 
 class TestLiveMode:
     """Verify output in live/TTY mode (PTY subprocess)."""
@@ -303,6 +360,32 @@ class TestLiveMode:
             screen
         )
 
+    def test_single_file_parametrized_one_line(self, ftdir):
+        """Single file with parametrized tests must render on exactly one file line."""
+        ftdir.copy_case("reporting_single_file_params")
+        result = ftdir.run_pytest_tty("--threadpool", "5")
+        result.assert_outcomes(passed=5)
+
+        screen = _render_terminal(result.stdout)
+        file_lines = [line for line in screen if "test_case.py" in line and "." in line]
+        assert len(file_lines) == 1, (
+            f"Expected test_case.py on exactly 1 line, got {len(file_lines)}: "
+            f"{file_lines}\nscreen:\n" + "\n".join(screen)
+        )
+
+    def test_stdout_during_parallel_no_corruption(self, ftdir):
+        """print() in parallel tests must not corrupt live display."""
+        ftdir.copy_case("reporting_stdout_during_parallel")
+        result = ftdir.run_pytest_tty("--threadpool", "5")
+        result.assert_outcomes(passed=5)
+
+        screen = _render_terminal(result.stdout)
+        file_lines = [line for line in screen if "test_case.py" in line and "." in line]
+        assert len(file_lines) == 1, (
+            f"Test stdout corrupted display — expected test_case.py on 1 line, "
+            f"got {len(file_lines)}: {file_lines}\nscreen:\n" + "\n".join(screen)
+        )
+
     def test_file_lines_no_per_line_progress(self, ftdir):
         """File lines in live mode do not have individual percentages."""
         _setup_multi_file_pkg(ftdir)
@@ -314,4 +397,48 @@ class TestLiveMode:
             if _RESULT_LINE_RE.search(line):
                 assert not re.search(r"\[\s*\d+%\]", line), (
                     f"File line has per-line progress: {line!r}"
+                )
+
+    def test_sequential_shows_nodeid(self, ftdir):
+        """Sequential tests between parallel groups display file::test format."""
+        _setup_mixed_groups(ftdir)
+        result = ftdir.run_pytest_tty("--threadpool", "4")
+        result.assert_outcomes(passed=5)
+
+        screen = _render_terminal(result.stdout)
+        nodeid_lines = [line for line in screen if "::test_verify" in line]
+        assert nodeid_lines, (
+            "Sequential test_verify not shown in nodeid format.\nscreen:\n" + "\n".join(screen)
+        )
+        assert any("PASSED" in line for line in nodeid_lines), (
+            f"Nodeid line missing PASSED: {nodeid_lines}\nscreen:\n" + "\n".join(screen)
+        )
+
+    def test_sequential_not_overwritten_by_next_group(self, ftdir):
+        """Sequential test output is not overwritten by the next parallel group's pre_print."""
+        _setup_mixed_groups(ftdir)
+        result = ftdir.run_pytest_tty("--threadpool", "4")
+        result.assert_outcomes(passed=5)
+
+        screen = _render_terminal(result.stdout)
+        # test_verify must appear as its own visible line, not erased
+        verify_lines = [line for line in screen if "test_verify" in line]
+        assert verify_lines, (
+            "test_verify was overwritten by next parallel group.\nscreen:\n" + "\n".join(screen)
+        )
+
+    def test_no_blank_line_between_groups(self, ftdir):
+        """No extra blank lines between parallel group progress and next output."""
+        _setup_mixed_groups(ftdir)
+        result = ftdir.run_pytest_tty("--threadpool", "4")
+        result.assert_outcomes(passed=5)
+
+        screen = _render_terminal(result.stdout)
+        # Find progress line and check no blank line follows
+        for i, line in enumerate(screen):
+            if re.search(r"\d+/\d+\s*\[\s*100%\]", line) and i + 1 < len(screen):
+                next_line = screen[i + 1]
+                assert next_line.strip(), (
+                    f"Blank line after progress line at index {i}.\nscreen:\n"
+                    + "\n".join(f"  {j}: {s!r}" for j, s in enumerate(screen))
                 )

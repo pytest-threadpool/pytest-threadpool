@@ -60,7 +60,8 @@ class GroupKeyBuilder:
 
         if child_parallel:
             if GroupKeyBuilder._is_package_level(item, own, cls, mod, pkg):
-                return (_GroupPrefix.PKG_CHILDREN, item.module.__package__)
+                source = MarkerResolver.marker_source_package(item)
+                return (_GroupPrefix.PKG_CHILDREN, source or item.module.__package__)
             if item.cls:
                 fp_key = MarkerResolver.fixture_param_key(item)
                 if fp_key:
@@ -94,6 +95,9 @@ class GroupKeyBuilder:
         """Group consecutive items by parallel group key.
 
         Returns a list of (key, [items]) tuples.
+        Package-level groups that are split by sequential items
+        (e.g. @not_parallelizable functions) are merged back together,
+        with the sequential items deferred to after the parallel batch.
         """
         groups: list[tuple[object, list]] = []
         prev_key = object()
@@ -103,4 +107,48 @@ class GroupKeyBuilder:
                 groups.append((key, []))
                 prev_key = key
             groups[-1][1].append(item)
-        return groups
+        return GroupKeyBuilder._merge_package_groups(groups)
+
+    @staticmethod
+    def _merge_package_groups(
+        groups: list[tuple[object, list]],
+    ) -> list[tuple[object, list]]:
+        """Merge non-consecutive groups sharing the same PKG_CHILDREN key.
+
+        Sequential (None-key) items between fragments are deferred to after
+        the merged parallel group, preserving their relative order.
+        """
+        pkg_indices: dict[object, list[int]] = {}
+        for i, (key, _) in enumerate(groups):
+            if isinstance(key, tuple) and key[0] == _GroupPrefix.PKG_CHILDREN:
+                pkg_indices.setdefault(key, []).append(i)
+
+        fragmented = {k for k, v in pkg_indices.items() if len(v) > 1}
+        if not fragmented:
+            return groups
+
+        merged: list[tuple[object, list]] = []
+        consumed: set[int] = set()
+        for i, (key, items) in enumerate(groups):
+            if i in consumed:
+                continue
+            if key not in fragmented:
+                merged.append((key, items))
+                continue
+
+            # Merge all fragments of this package key
+            indices = pkg_indices[key]
+            parallel_items: list = []
+            deferred: list[tuple[object, list]] = []
+            for j in range(indices[0], indices[-1] + 1):
+                consumed.add(j)
+                gkey, gitems = groups[j]
+                if gkey == key:
+                    parallel_items.extend(gitems)
+                else:
+                    deferred.append((gkey, gitems))
+
+            merged.append((key, parallel_items))
+            merged.extend(deferred)
+
+        return merged

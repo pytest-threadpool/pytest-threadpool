@@ -15,7 +15,7 @@ and `pyright` before each commit.
 
 > Free-threaded builds (3.13t, 3.14t, 3.15t) ship with the GIL disabled and
 > provide true parallelism. Standard builds (3.13, 3.14, 3.15) are also
-> supported — threads work but the GIL serializes CPU-bound code.
+> supported — threads work, but the GIL serializes CPU-bound code.
 
 ## Architecture rules
 

@@ -85,6 +85,29 @@ class MarkerResolver:
         return None
 
     @staticmethod
+    def marker_source_package(item) -> str | None:
+        """Return the package name where the parallelizable marker was found.
+
+        Walks the package hierarchy from most specific to least specific,
+        returning the name of the first package that has a parallelizable marker.
+        Returns None if no package has the marker.
+        """
+        pkg_name = getattr(item.module, "__package__", None)
+        if not pkg_name:
+            return None
+        parts = pkg_name.split(".")
+        for i in range(len(parts), 0, -1):
+            pkg = ".".join(parts[:i])
+            mod = sys.modules.get(pkg)
+            if mod is None:
+                continue
+            marks = getattr(mod, "pytestmark", [])
+            scope = MarkerResolver.scope_from_marks(marks)
+            if scope:
+                return pkg
+        return None
+
+    @staticmethod
     def has_package_parallel_only(item) -> bool:
         """Check if any package in the item's hierarchy has parallel_only."""
         pkg_name = getattr(item.module, "__package__", None)

@@ -28,6 +28,10 @@ dev = [
     "ruff>=0.9",
 ]
 
+examples = [
+    "selenium>=4.41.0",
+]
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"

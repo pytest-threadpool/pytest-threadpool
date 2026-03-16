@@ -3,8 +3,14 @@
 Function-scoped FixtureDefs are cloned per-item so each worker creates
 independent fixture instances.  These tests verify correctness across
 yield fixtures, addfinalizer, chained dependencies, shared-scope
-dependencies, xunit hooks, built-in fixtures, and actual parallel timing.
+dependencies, xunit hooks, built-in fixtures, conftest fixtures,
+implicit scope, and actual parallel timing.
 """
+
+import shutil
+from pathlib import Path
+
+CASES_DIR = Path(__file__).parent / "cases"
 
 
 class TestFuncScopedFixtureParallel:
@@ -55,6 +61,22 @@ class TestFuncScopedFixtureParallel:
     def test_fixture_setup_runs_in_parallel(self, ftdir):
         """Slow function fixture setup runs concurrently, not sequentially."""
         ftdir.copy_case("fixture_func_setup_parallel")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)
+
+    def test_implicit_function_scope(self, ftdir):
+        """Fixtures without explicit scope= are function-scoped and cloned per-item."""
+        ftdir.copy_case("fixture_func_implicit_scope")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=4)
+
+    def test_conftest_function_fixture(self, ftdir):
+        """Function-scoped fixtures from conftest.py are cloned per-item."""
+        ftdir.copy_case("fixture_func_from_conftest")
+        shutil.copy2(
+            CASES_DIR / "fixture_func_from_conftest_conftest.py",
+            ftdir.path / "conftest.py",
+        )
         result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=4)
 

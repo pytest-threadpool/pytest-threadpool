@@ -268,3 +268,68 @@ class TestIsPackageLevel:
     def test_pkg_none_returns_false(self):
         item = types.SimpleNamespace(cls=None)
         assert GroupKeyBuilder._is_package_level(item, None, None, None, None) is False
+
+
+class TestMergePackageGroups:
+    """Tests for GroupKeyBuilder._merge_package_groups."""
+
+    def test_no_fragmented_groups_unchanged(self):
+        groups = [
+            ((_GroupPrefix.PKG_CHILDREN, "pkg_a"), ["item1", "item2"]),
+            (None, ["seq1"]),
+            ((_GroupPrefix.PKG_CHILDREN, "pkg_b"), ["item3"]),
+        ]
+        result = GroupKeyBuilder._merge_package_groups(groups)
+        assert result == groups
+
+    def test_fragmented_pkg_merged(self):
+        key = (_GroupPrefix.PKG_CHILDREN, "mypkg")
+        groups = [
+            (key, ["a1", "a2"]),
+            (None, ["seq"]),
+            (key, ["b1", "b2"]),
+        ]
+        result = GroupKeyBuilder._merge_package_groups(groups)
+        assert len(result) == 2
+        assert result[0] == (key, ["a1", "a2", "b1", "b2"])
+        assert result[1] == (None, ["seq"])
+
+    def test_multiple_sequential_between_fragments(self):
+        key = (_GroupPrefix.PKG_CHILDREN, "mypkg")
+        groups = [
+            (key, ["a1"]),
+            (None, ["seq1"]),
+            (None, ["seq2"]),
+            (key, ["b1"]),
+        ]
+        result = GroupKeyBuilder._merge_package_groups(groups)
+        assert len(result) == 3
+        assert result[0] == (key, ["a1", "b1"])
+        assert result[1] == (None, ["seq1"])
+        assert result[2] == (None, ["seq2"])
+
+    def test_three_fragments_merged(self):
+        key = (_GroupPrefix.PKG_CHILDREN, "mypkg")
+        groups = [
+            (key, ["a1"]),
+            (None, ["s1"]),
+            (key, ["b1"]),
+            (None, ["s2"]),
+            (key, ["c1"]),
+        ]
+        result = GroupKeyBuilder._merge_package_groups(groups)
+        assert len(result) == 3
+        assert result[0] == (key, ["a1", "b1", "c1"])
+        assert result[1] == (None, ["s1"])
+        assert result[2] == (None, ["s2"])
+
+    def test_non_pkg_groups_not_merged(self):
+        """CLASS groups are not merged even if they share the same key."""
+        key = (_GroupPrefix.CLASS, "MyClass")
+        groups = [
+            (key, ["a1"]),
+            (None, ["seq"]),
+            (key, ["b1"]),
+        ]
+        result = GroupKeyBuilder._merge_package_groups(groups)
+        assert len(result) == 3  # Not merged

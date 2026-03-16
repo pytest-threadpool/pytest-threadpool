@@ -4,10 +4,10 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 echo "Running ruff format..."
-uv run ruff format --check src/ tests/
+uv run ruff format --check src/ tests/ examples/
 
 echo "Running ruff check..."
-uv run ruff check src/ tests/
+uv run ruff check src/ tests/ examples/
 
 echo "Running pyright..."
 uv run pyright src/

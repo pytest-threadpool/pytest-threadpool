@@ -149,6 +149,84 @@ class TestPackageLevelParallel:
         result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=3)
 
+    def test_not_parallelizable_between_modules_merges_group(self, ftdir):
+        """@not_parallelizable functions between parallel modules don't
+        split the package group.  All parallel items run in one batch
+        and the sequential items run after."""
+        pkg = ftdir.mkdir("mergepkg")
+        pkg.joinpath("__init__.py").write_text(
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
+        )
+        pkg.joinpath("_state.py").write_text(
+            "import threading\n\n"
+            "class State:\n"
+            "    barrier = threading.Barrier(4, timeout=10)\n"
+            "    results = []\n"
+        )
+        pkg.joinpath("test_a.py").write_text(
+            "import pytest\n"
+            "from mergepkg._state import State\n\n"
+            "class TestA:\n"
+            "    def test_a1(self):\n"
+            "        State.barrier.wait()\n"
+            "        State.results.append('a1')\n\n"
+            "    def test_a2(self):\n"
+            "        State.barrier.wait()\n"
+            "        State.results.append('a2')\n\n"
+            "@pytest.mark.not_parallelizable\n"
+            "def test_verify_a():\n"
+            "    assert 'a1' in State.results\n"
+            "    assert 'a2' in State.results\n"
+        )
+        pkg.joinpath("test_b.py").write_text(
+            "import pytest\n"
+            "from mergepkg._state import State\n\n"
+            "def test_b1():\n"
+            "    State.barrier.wait()\n"
+            "    State.results.append('b1')\n\n"
+            "def test_b2():\n"
+            "    State.barrier.wait()\n"
+            "    State.results.append('b2')\n\n"
+            "@pytest.mark.not_parallelizable\n"
+            "def test_verify_b():\n"
+            "    assert 'b1' in State.results\n"
+            "    assert 'b2' in State.results\n"
+        )
+        result = ftdir.run_pytest("--threadpool", "4")
+        result.assert_outcomes(passed=6)
+
+    def test_parent_package_marker_merges_subpackages(self, ftdir):
+        """Marker on parent package groups all subpackage items together."""
+        pkg = ftdir.mkdir("parentpkg")
+        pkg.joinpath("__init__.py").write_text(
+            'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
+        )
+        sub_a = pkg.joinpath("sub_a")
+        sub_a.mkdir()
+        sub_a.joinpath("__init__.py").write_text("")
+        sub_b = pkg.joinpath("sub_b")
+        sub_b.mkdir()
+        sub_b.joinpath("__init__.py").write_text("")
+        pkg.joinpath("_state.py").write_text(
+            "import threading\n\nclass State:\n    barrier = threading.Barrier(4, timeout=10)\n"
+        )
+        sub_a.joinpath("test_sa.py").write_text(
+            "from parentpkg._state import State\n\n"
+            "def test_sa1():\n"
+            "    State.barrier.wait()\n\n"
+            "def test_sa2():\n"
+            "    State.barrier.wait()\n"
+        )
+        sub_b.joinpath("test_sb.py").write_text(
+            "from parentpkg._state import State\n\n"
+            "def test_sb1():\n"
+            "    State.barrier.wait()\n\n"
+            "def test_sb2():\n"
+            "    State.barrier.wait()\n"
+        )
+        result = ftdir.run_pytest("--threadpool", "4")
+        result.assert_outcomes(passed=4)
+
     def test_parallel_only_skips_without_flag(self, ftdir):
         """parallel_only marker skips tests when --threadpool is not passed."""
         ftdir.copy_case("parallel_only_skip")

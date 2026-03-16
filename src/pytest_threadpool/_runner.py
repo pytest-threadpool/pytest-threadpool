@@ -1,7 +1,9 @@
 """Parallel test runner orchestration."""
 
+import io
 import os
 import queue
+import sys
 import threading
 from collections import OrderedDict
 
@@ -9,6 +11,42 @@ from _pytest.runner import CallInfo, call_and_report, show_test_item
 
 from pytest_threadpool._fixtures import FixtureManager
 from pytest_threadpool._grouping import GroupKeyBuilder
+
+
+class _ThreadLocalStream:
+    """Thread-local stream proxy for suppressing worker stdout/stderr.
+
+    Installed once on sys.stdout/sys.stderr before parallel workers start.
+    Worker threads call ``activate()`` to redirect their writes to a
+    per-thread StringIO buffer, and ``deactivate()`` to stop.  Writes
+    from non-worker threads (e.g. the main thread, live reporter) pass
+    through to the real stream.
+    """
+
+    def __init__(self, real: object):
+        self._real = real
+        self._local = threading.local()
+
+    def activate(self) -> None:
+        self._local.buf = io.StringIO()
+
+    def deactivate(self) -> None:
+        self._local.buf = None
+
+    def write(self, s: str) -> int:
+        buf = getattr(self._local, "buf", None)
+        return buf.write(s) if buf is not None else self._real.write(s)  # type: ignore[union-attr]
+
+    def flush(self) -> None:
+        buf = getattr(self._local, "buf", None)
+        if buf is not None:
+            buf.flush()
+        else:
+            self._real.flush()  # type: ignore[union-attr]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
 
 # Test slot states
 _SCHEDULED = "scheduled"
@@ -72,6 +110,10 @@ class _LiveReporter:
         # that bypass TerminalWriter formatting.
         self._file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
 
+        # Track whether dumb mode has written any file lines, so we
+        # know when to prefix with \n for line separation.
+        self._dumb_needs_sep = False
+
         # Pre-compute colors for worker-thread display updates
         markup = self._tw.hasmarkup if self._tw else False
         self._pass_color = "\033[32m" if markup else ""
@@ -105,6 +147,9 @@ class _LiveReporter:
             return
         assert self._file is not None
         f = self._file
+        # Start on a fresh line so we don't overwrite any preceding
+        # output (e.g. sequential test results between parallel groups).
+        f.write("\n")
         for fspath in self._file_order:
             self._write_line_live(fspath)
             f.write("\n")
@@ -166,8 +211,11 @@ class _LiveReporter:
     def finish(self):
         """Reset terminal reporter state after live output."""
         if self._live and self._tw and self._file:
-            # Finalize the progress line and move to the next line
-            self._file.write("\n")
+            # End the progress line and move cursor back up so the
+            # terminal reporter's next _tw.line() call (from
+            # write_fspath_result or the summary separator) brings
+            # the cursor back down without creating a blank line.
+            self._file.write("\n\033[A")
             self._file.flush()
         if self._tr:
             self._tr.currentfspath = None
@@ -222,7 +270,12 @@ class _LiveReporter:
                     f.write(letter)
 
     def _write_line_plain(self, fspath):
-        """Write a file line without ANSI codes (dumb/pipe mode)."""
+        """Write a file line without ANSI codes (dumb/pipe mode).
+
+        No trailing newline: subsequent calls prefix with \\n for line
+        separation.  This lets the terminal reporter's write_fspath_result
+        naturally end the last line without creating a blank line.
+        """
         assert self._file is not None
         f = self._file
         rel = self._rel_path(fspath)
@@ -233,9 +286,10 @@ class _LiveReporter:
             _, letter, _ = self._item_state[item]
             letters += letter
 
-        line = f"{rel} {letters}{progress}\n"
-        f.write(line)
+        sep = "\n" if self._dumb_needs_sep else ""
+        f.write(f"{sep}{rel} {letters}{progress}")
         f.flush()
+        self._dumb_needs_sep = True
 
     def _write_progress_line(self):
         """Write/update the progress line at the bottom."""
@@ -297,7 +351,11 @@ class ParallelRunner:
             return True
 
         groups = GroupKeyBuilder.build_groups(session.items)
+        has_parallel = any(
+            k is not None and len(gi) > 1 and self._nthreads > 1 for k, gi in groups
+        )
 
+        had_sequential = False
         for group_key, items in groups:
             if session.shouldfail:
                 raise session.Failed(session.shouldfail)
@@ -307,9 +365,14 @@ class ParallelRunner:
             if group_key is None or len(items) <= 1 or self._nthreads <= 1:
                 for i, item in enumerate(items):
                     nextitem = items[i + 1] if i + 1 < len(items) else None
-                    self._run_sequential(item, nextitem)
+                    if has_parallel:
+                        self._run_sequential_nodeid(item, nextitem)
+                    else:
+                        self._run_sequential(item, nextitem)
+                had_sequential = bool(items)
             else:
-                self._run_parallel(items)
+                self._run_parallel(items, after_sequential=had_sequential)
+                had_sequential = False
 
         return True
 
@@ -338,7 +401,75 @@ class ParallelRunner:
 
         ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
 
-    def _run_parallel(self, items) -> None:
+    def _run_sequential_nodeid(self, item, nextitem) -> None:
+        """Run a single item sequentially with nodeid-style reporting.
+
+        Used for sequential items in mixed parallel/sequential sessions
+        so the output (``file::test PASSED``) visually distinguishes
+        them from parallel groups (``file .....``).
+        """
+        tr = self._session.config.pluginmanager.get_plugin("terminalreporter")
+        # noinspection PyProtectedMember
+        tw = tr._tw if tr and hasattr(tr, "_tw") else None  # pyright: ignore[reportPrivateUsage]
+        # noinspection PyProtectedMember
+        f = getattr(tw, "_file", None) if tw else None  # pyright: ignore[reportPrivateUsage]
+
+        # Suppress terminal reporter output so we can write our own format
+        orig_write = None
+        orig_line = None
+        if tw:
+            orig_write = tw.write
+            orig_line = tw.line
+            tw.write = lambda *a, **kw: None
+            tw.line = lambda *a, **kw: None
+
+        try:
+            ihook = item.ihook
+            ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
+
+            # noinspection PyProtectedMember
+            if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]
+
+            rep_setup = call_and_report(item, "setup", log=True)
+            call_rep = None
+            if rep_setup.passed:
+                if item.config.getoption("setupshow", False):
+                    show_test_item(item)
+                if not item.config.getoption("setuponly", False):
+                    call_rep = call_and_report(item, "call", log=True)
+            call_and_report(item, "teardown", log=True, nextitem=nextitem)
+
+            if hasattr(item, "_request"):
+                item._request = False  # pyright: ignore[reportPrivateUsage]
+                item.funcargs = None
+
+            ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
+        finally:
+            if tw and orig_write is not None:
+                tw.write = orig_write
+                tw.line = orig_line
+
+        # Write nodeid-style result line
+        if f:
+            report = call_rep if call_rep is not None else rep_setup
+            if report.passed:
+                word = "PASSED"
+                color = "\033[32m" if tw and tw.hasmarkup else ""
+            elif report.failed:
+                word = "FAILED"
+                color = "\033[31;1m" if tw and tw.hasmarkup else ""
+            elif report.skipped:
+                word = "SKIPPED"
+                color = "\033[33m" if tw and tw.hasmarkup else ""
+            else:
+                word = "?"
+                color = ""
+            reset = "\033[0m" if color else ""
+            f.write(f"\n{item.nodeid} {color}{word}{reset}")
+            f.flush()
+
+    def _run_parallel(self, items, after_sequential: bool = False) -> None:
         """Run a group's tests with parallel fixture setup and calls.
 
         Function-scoped FixtureDefs are cloned per-item so their setup can
@@ -407,7 +538,7 @@ class ParallelRunner:
         #
         # noinspection PyProtectedMember
         parallel_items = []
-        shared_populated = False
+        shared_populated_modules: set = set()
 
         for item in items:
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
@@ -423,12 +554,14 @@ class ParallelRunner:
                 session._setupstate.teardown_exact(nextitem=item)  # pyright: ignore[reportPrivateUsage]
 
             # Fire setup hooks with a custom setup function:
-            # - First eligible item: resolve shared fixtures only (populates caches)
-            # - Remaining items: no-op (shared caches already populated)
+            # - First eligible item per module: resolve shared fixtures (populates caches)
+            # - Remaining items in same module: no-op (shared caches already populated)
             # This evaluates skip/xfail markers and initializes capture/logging
             # without creating function-scoped fixtures.
+            # Per-module tracking ensures cross-module PKG_CHILDREN groups
+            # correctly populate shared fixtures for each module.
             original_setup = item.setup
-            if not shared_populated:
+            if item.module not in shared_populated_modules:
                 item.setup = lambda i=item: FixtureManager.populate_shared_fixtures(i)
             else:
                 item.setup = lambda: None
@@ -448,8 +581,7 @@ class ParallelRunner:
                 setup_passed[item] = False
                 continue
 
-            if not shared_populated:
-                shared_populated = True
+            shared_populated_modules.add(item.module)
 
             FixtureManager.clone_function_fixturedefs(item)
             parallel_items.append(item)
@@ -466,6 +598,8 @@ class ParallelRunner:
         call_results = {}
         reported = set()
         live = _LiveReporter(session, items)
+        if after_sequential:
+            live._dumb_needs_sep = True
         live.pre_print()
 
         cancelled = threading.Event()
@@ -490,7 +624,9 @@ class ParallelRunner:
             """
             if cancelled.is_set():
                 return test_item, None, None, None
+            return _do_worker_body(test_item)
 
+        def _do_worker_body(test_item):
             # Redirect node.addfinalizer to per-item list
             original_addfinalizer = test_item.addfinalizer
             node_fins = []
@@ -537,15 +673,15 @@ class ParallelRunner:
             """Report a single item — live cursor mode or plain fallback."""
             ihook = item.ihook
 
-            call_rep = None
-            if setup_passed[item] and item in call_results:
-                call_info = call_results[item]
-                call_rep = ihook.pytest_runtest_makereport(item=item, call=call_info)
-
-            report = call_rep or setup_reports[item]
-
             live.suppress()
             try:
+                call_rep = None
+                if setup_passed[item] and item in call_results:
+                    call_info = call_results[item]
+                    call_rep = ihook.pytest_runtest_makereport(item=item, call=call_info)
+
+                report = call_rep or setup_reports[item]
+
                 ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
                 if setup_passed[item]:
@@ -561,6 +697,18 @@ class ParallelRunner:
 
         teardown_infos = {}
 
+        # In live mode, install thread-local stream proxies so worker
+        # print() output doesn't corrupt ANSI cursor positioning.
+        # Each worker activates its own buffer; the main thread and
+        # live reporter writes pass through to the real streams.
+        stdout_proxy: _ThreadLocalStream | None = None
+        stderr_proxy: _ThreadLocalStream | None = None
+        if live.live:
+            stdout_proxy = _ThreadLocalStream(sys.stdout)
+            stderr_proxy = _ThreadLocalStream(sys.stderr)
+            sys.stdout = stdout_proxy  # type: ignore[assignment]
+            sys.stderr = stderr_proxy  # type: ignore[assignment]
+
         interrupted = False
         if workers > 1 and len(parallel_items) > 1:
             work_queue = queue.SimpleQueue()
@@ -571,6 +719,9 @@ class ParallelRunner:
                     work_item = work_queue.get()
                     if work_item is None or cancelled.is_set():
                         return
+                    if stdout_proxy is not None:
+                        stdout_proxy.activate()
+                        stderr_proxy.activate()  # type: ignore[union-attr]
                     try:
                         item, setup_info, call_info, td_info = _do_setup_call_teardown(work_item)
                         if setup_info is not None:
@@ -588,6 +739,10 @@ class ParallelRunner:
                             when="call",
                         )
                         result_queue.put((work_item, call_info))
+                    finally:
+                        if stdout_proxy is not None:
+                            stdout_proxy.deactivate()
+                            stderr_proxy.deactivate()  # type: ignore[union-attr]
 
             threads = []
             for _ in range(workers):
@@ -620,15 +775,23 @@ class ParallelRunner:
             # Single worker fallback
             try:
                 for item in parallel_items:
-                    item, setup_info, call_info, td_info = _do_setup_call_teardown(item)
-                    if setup_info is not None:
-                        setup_rep = item.ihook.pytest_runtest_makereport(
-                            item=item, call=setup_info
-                        )
-                        setup_reports[item] = setup_rep
-                        setup_passed[item] = setup_info.excinfo is None
-                    if td_info is not None:
-                        teardown_infos[item] = td_info
+                    if stdout_proxy is not None:
+                        stdout_proxy.activate()
+                        stderr_proxy.activate()  # type: ignore[union-attr]
+                    try:
+                        item, setup_info, call_info, td_info = _do_setup_call_teardown(item)
+                        if setup_info is not None:
+                            setup_rep = item.ihook.pytest_runtest_makereport(
+                                item=item, call=setup_info
+                            )
+                            setup_reports[item] = setup_rep
+                            setup_passed[item] = setup_info.excinfo is None
+                        if td_info is not None:
+                            teardown_infos[item] = td_info
+                    finally:
+                        if stdout_proxy is not None:
+                            stdout_proxy.deactivate()
+                            stderr_proxy.deactivate()  # type: ignore[union-attr]
                     if call_info is not None:
                         call_results[item] = call_info
                     _report_item(item)
@@ -642,6 +805,11 @@ class ParallelRunner:
                     _report_item(item)
 
         live.finish()
+
+        # Restore real stdout/stderr after all workers are done
+        if stdout_proxy is not None:
+            sys.stdout = stdout_proxy._real  # type: ignore[assignment]
+            sys.stderr = stderr_proxy._real  # type: ignore[union-attr, assignment]
 
         # Pop parallel items from setupstate stack
         # noinspection PyProtectedMember
