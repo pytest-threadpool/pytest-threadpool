@@ -40,7 +40,7 @@ class TestQueue:
         yield user
         user_pool.put(user, timeout=5)
 
-    @pytest.mark.parametrize("tc_id", [1, 2, 3, 4, 5])
+    @pytest.mark.parametrize("tc_id", range(5))
     def test(self, test_data, tc_id):
         """4 users in the pool, 5 tests in parallel.
 
