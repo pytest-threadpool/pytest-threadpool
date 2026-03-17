@@ -60,6 +60,38 @@ those are the only two fields mutated during fixture lifecycle — but it's frag
 **Priority:** Medium — current implementation works, but one pytest release could
 break it silently.
 
+## Interactive per-worker output viewer
+
+**Goal:** Let users see live stdout/stderr from individual worker threads
+during parallel execution, without output interleaving.
+
+**Problem:** Currently, worker output is suppressed by `_ThreadLocalStream`
+during parallel execution. Users see nothing until the reporting phase.
+Passing `-s` shows interleaved output from all workers, which is unreadable.
+
+**Approach:** Two modes, selected automatically based on terminal capability:
+
+- **Interactive mode** (TTY detected): A status bar shows worker threads and
+  their current test. The user switches focus between workers (keyboard
+  shortcut or arrow keys) to stream one worker's buffered output live to the
+  main terminal area. Unfocused workers continue buffering silently, indicated
+  by status dots or spinners. Similar to `docker compose logs --follow` with
+  service selection.
+
+- **Buffer mode** (pipe/CI, or explicit opt-out): Per-worker output is
+  collected and replayed sequentially during the reporting phase. This is the
+  fallback and the default for non-TTY environments.
+
+**Control:** `--threadpool-output=live|buffered` flag for explicit selection.
+Default: `live` when stdout is a TTY, `buffered` otherwise.
+
+**Prerequisites:** Depends on the capture fixture support work — the
+per-worker buffer infrastructure for capsys/caplog is the same data source
+the interactive viewer would consume.
+
+**Priority:** Low — nice to have after capture fixtures and core stability
+work lands.
+
 ## Plugin compatibility testing
 
 Validate and document interactions with commonly used pytest plugins:
