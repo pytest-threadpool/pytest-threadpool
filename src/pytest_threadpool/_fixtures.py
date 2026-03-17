@@ -1,5 +1,7 @@
 """Fixture finalizer save/restore helpers for parallel execution."""
 
+from collections.abc import Iterable
+
 from _pytest.fixtures import FixtureDef
 from _pytest.scope import Scope
 
@@ -125,6 +127,24 @@ class FixtureManager:
                 # the first tmp_path_factory.mktemp() call.
                 if hasattr(value, "getbasetemp"):
                     value.getbasetemp()
+
+    @staticmethod
+    def run_finalizers(finalizers: Iterable, msg: str = "errors during fixture teardown") -> None:
+        """Run finalizers in reverse order, collecting all exceptions.
+
+        Raises the single exception directly if only one occurs, or a
+        BaseExceptionGroup if multiple finalizers fail.
+        """
+        exceptions = []
+        for fn in reversed(list(finalizers)):
+            try:
+                fn()
+            except BaseException as e:
+                exceptions.append(e)
+        if len(exceptions) == 1:
+            raise exceptions[0]
+        if exceptions:
+            raise BaseExceptionGroup(msg, exceptions)
 
     @staticmethod
     def save_collector_finalizers(session, next_item) -> list:

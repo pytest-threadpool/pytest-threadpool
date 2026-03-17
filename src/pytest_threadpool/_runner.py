@@ -53,6 +53,14 @@ _SCHEDULED = "scheduled"
 _RUNNING = "running"
 _DONE = "done"
 
+# ANSI color codes for terminal output
+_GREEN = "\033[32m"
+_RED_BOLD = "\033[31;1m"
+_YELLOW = "\033[33m"
+_CYAN_BOLD = "\033[36;1m"
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+
 
 class _LiveReporter:
     """Reports parallel results with live per-file line updates.
@@ -116,8 +124,8 @@ class _LiveReporter:
 
         # Pre-compute colors for worker-thread display updates
         markup = self._tw.hasmarkup if self._tw else False
-        self._pass_color = "\033[32m" if markup else ""
-        self._fail_color = "\033[31;1m" if markup else ""
+        self._pass_color = _GREEN if markup else ""
+        self._fail_color = _RED_BOLD if markup else ""
 
     @property
     def live(self):
@@ -262,12 +270,12 @@ class _LiveReporter:
         for item in self._file_items[fspath]:
             state, letter, color = self._item_state[item]
             if state == _SCHEDULED:
-                f.write("\033[2m·\033[0m")
+                f.write(f"{_DIM}·{_RESET}")
             elif state == _RUNNING:
-                f.write("\033[36;1m●\033[0m")
+                f.write(f"{_CYAN_BOLD}●{_RESET}")
             else:
                 if color:
-                    f.write(f"{color}{letter}\033[0m")
+                    f.write(f"{color}{letter}{_RESET}")
                 else:
                     f.write(letter)  # pragma: no cover -- live mode requires TTY with markup
 
@@ -283,10 +291,7 @@ class _LiveReporter:
         rel = self._rel_path(fspath)
         progress = f" [{100 * self._reported // self._total:3d}%]"
 
-        letters = ""
-        for item in self._file_items[fspath]:
-            _, letter, _ = self._item_state[item]
-            letters += letter
+        letters = "".join(self._item_state[item][1] for item in self._file_items[fspath])
 
         sep = "\n" if self._dumb_needs_sep else ""
         f.write(f"{sep}{rel} {letters}{progress}")
@@ -320,11 +325,11 @@ class _LiveReporter:
         if not self._tw or not self._tw.hasmarkup:
             return ""
         if report.passed:
-            return "\033[32m"  # green
+            return _GREEN
         if report.failed:  # pragma: no cover -- integration tests only produce passing reports
-            return "\033[31;1m"  # red bold
+            return _RED_BOLD
         if report.skipped:  # pragma: no cover -- skip reports don't reach _color_for path
-            return "\033[33m"  # yellow
+            return _YELLOW
         return ""  # pragma: no cover -- unknown report status fallback
 
 
@@ -471,19 +476,20 @@ class ParallelRunner:
         # Write nodeid-style result line
         if f:
             report = call_rep if call_rep is not None else rep_setup
+            markup = tw and tw.hasmarkup
             if report.passed:
                 word = "PASSED"
-                color = "\033[32m" if tw and tw.hasmarkup else ""
+                color = _GREEN if markup else ""
             elif report.failed:
                 word = "FAILED"
-                color = "\033[31;1m" if tw and tw.hasmarkup else ""
+                color = _RED_BOLD if markup else ""
             elif report.skipped:
                 word = "SKIPPED"
-                color = "\033[33m" if tw and tw.hasmarkup else ""
+                color = _YELLOW if markup else ""
             else:  # pragma: no cover -- unknown report status; never produced by pytest
                 word = "?"
                 color = ""
-            reset = "\033[0m" if color else ""
+            reset = _RESET if color else ""
             f.write(f"\n{item.nodeid} {color}{word}{reset}")
             f.flush()
 
@@ -677,22 +683,9 @@ class ParallelRunner:
                 # Includes yield cleanup, addfinalizer callbacks, and
                 # node-level finalizers captured during setup.
                 all_fins = list(node_fins) + fixture_fins
-
-                def _run_fins(fns=all_fins):
-                    exceptions = []
-                    for fn in reversed(fns):
-                        try:
-                            fn()
-                        except BaseException as e:
-                            exceptions.append(e)
-                    if len(exceptions) == 1:
-                        raise exceptions[
-                            0
-                        ]  # pragma: no cover -- single-exception teardown; hard to trigger
-                    if exceptions:
-                        raise BaseExceptionGroup("errors during fixture teardown", exceptions)
-
-                teardown_info = CallInfo.from_call(_run_fins, when="teardown")
+                teardown_info = CallInfo.from_call(
+                    lambda fns=all_fins: FixtureManager.run_finalizers(fns), when="teardown"
+                )
                 return test_item, setup_info, call_info, teardown_info
 
             FixtureManager.clear_function_fixture_caches(test_item)
@@ -900,22 +893,9 @@ class ParallelRunner:
             else:
                 # Fallback: run finalizers now (setuponly mode).
                 fins = per_item_fixture_fins.get(item, [])
-
-                def _run_fins(fns=fins):
-                    exceptions = []
-                    for fn in reversed(fns):
-                        try:
-                            fn()
-                        except BaseException as e:
-                            exceptions.append(e)
-                    if len(exceptions) == 1:
-                        raise exceptions[
-                            0
-                        ]  # pragma: no cover -- single-exception teardown in setuponly
-                    if exceptions:
-                        raise BaseExceptionGroup("errors during fixture teardown", exceptions)
-
-                teardown_info = CallInfo.from_call(_run_fins, when="teardown")
+                teardown_info = CallInfo.from_call(
+                    lambda fns=fins: FixtureManager.run_finalizers(fns), when="teardown"
+                )
 
             rep = item.ihook.pytest_runtest_makereport(item=item, call=teardown_info)
             item.ihook.pytest_runtest_logreport(report=rep)
@@ -932,14 +912,9 @@ class ParallelRunner:
         # next group stay in the stack with their cached fixtures intact.
         session._setupstate.teardown_exact(nextitem=next_group_first)  # pyright: ignore[reportPrivateUsage]
 
-        exceptions = []
-        for _node, fins in reversed(saved_collector_fins):
-            for fin in reversed(fins):
-                try:
-                    fin()
-                except BaseException as e:
-                    exceptions.append(e)
-        if len(exceptions) == 1:
-            raise exceptions[0]  # pragma: no cover -- single-exception collector teardown
-        if exceptions:
-            raise BaseExceptionGroup("errors during deferred collector teardown", exceptions)
+        all_collector_fins = [
+            fin for _node, fins in reversed(saved_collector_fins) for fin in reversed(fins)
+        ]
+        FixtureManager.run_finalizers(
+            all_collector_fins, msg="errors during deferred collector teardown"
+        )

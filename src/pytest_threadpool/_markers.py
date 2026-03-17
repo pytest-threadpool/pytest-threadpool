@@ -1,6 +1,7 @@
 """Marker introspection for resolving effective parallel scope."""
 
 import sys
+from collections.abc import Iterator
 
 from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
@@ -10,6 +11,27 @@ from pytest_threadpool._constants import (
     SCOPE_NOT,
     ParallelScope,
 )
+
+
+def _walk_package_marks(item) -> Iterator[tuple[str, list]]:
+    """Yield (package_name, marks) for each package in the item's hierarchy.
+
+    Walks from most specific to least specific package.
+    Normalizes marks to a list before yielding.
+    """
+    pkg_name = getattr(item.module, "__package__", None)
+    if not pkg_name:
+        return
+    parts = pkg_name.split(".")
+    for i in range(len(parts), 0, -1):
+        pkg = ".".join(parts[:i])
+        mod = sys.modules.get(pkg)
+        if mod is None:
+            continue
+        marks = getattr(mod, "pytestmark", [])
+        if not isinstance(marks, list):
+            marks = [marks] if not isinstance(marks, tuple) else list(marks)
+        yield pkg, marks
 
 
 class MarkerResolver:
@@ -68,16 +90,7 @@ class MarkerResolver:
     @staticmethod
     def package_scope(item) -> str | None:
         """Parallel scope from the item's package hierarchy."""
-        pkg_name = getattr(item.module, "__package__", None)
-        if not pkg_name:
-            return None
-        parts = pkg_name.split(".")
-        for i in range(len(parts), 0, -1):
-            pkg = ".".join(parts[:i])
-            mod = sys.modules.get(pkg)
-            if mod is None:
-                continue
-            marks = getattr(mod, "pytestmark", [])
+        for _pkg, marks in _walk_package_marks(item):
             if MarkerResolver.has_not_marker(marks):
                 return SCOPE_NOT
             scope = MarkerResolver.scope_from_marks(marks)
@@ -93,16 +106,7 @@ class MarkerResolver:
         returning the name of the first package that has a parallelizable marker.
         Returns None if no package has the marker.
         """
-        pkg_name = getattr(item.module, "__package__", None)
-        if not pkg_name:
-            return None
-        parts = pkg_name.split(".")
-        for i in range(len(parts), 0, -1):
-            pkg = ".".join(parts[:i])
-            mod = sys.modules.get(pkg)
-            if mod is None:
-                continue
-            marks = getattr(mod, "pytestmark", [])
+        for pkg, marks in _walk_package_marks(item):
             scope = MarkerResolver.scope_from_marks(marks)
             if scope:
                 return pkg
@@ -111,17 +115,7 @@ class MarkerResolver:
     @staticmethod
     def has_package_parallel_only(item) -> bool:
         """Check if any package in the item's hierarchy has parallel_only."""
-        pkg_name = getattr(item.module, "__package__", None)
-        if not pkg_name:
-            return False
-        parts = pkg_name.split(".")
-        for i in range(len(parts), 0, -1):
-            mod = sys.modules.get(".".join(parts[:i]))
-            if mod is None:
-                continue
-            marks = getattr(mod, "pytestmark", [])
-            if not isinstance(marks, (list, tuple)):
-                marks = [marks]
+        for _pkg, marks in _walk_package_marks(item):
             if any(m.name == MARKER_PARALLEL_ONLY for m in marks):
                 return True
         return False
