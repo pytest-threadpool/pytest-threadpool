@@ -1,7 +1,7 @@
 [project]
 name = "pytest-threadpool"
 dynamic = ["version"]
-description = "Parallel test execution using threads — for developers, SDETs, and test automation engineers"
+description = "Parallel test execution using threads — true parallelism on free-threaded Python, concurrent I/O on standard builds"
 requires-python = ">=3.13"
 license = "Apache-2.0"
 readme = "README.md"
