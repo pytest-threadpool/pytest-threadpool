@@ -45,3 +45,21 @@ class TestXunitUnderParallel:
         ftdir.copy_case("xunit_function_mixed_parallel")
         result = ftdir.run_pytest("--threadpool", "3")
         result.assert_outcomes(passed=4)
+
+    def test_setup_class_across_groups(self, ftdir):
+        """setup_class/teardown_class: once per class across parallel groups."""
+        ftdir.copy_case("xunit_setup_class_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=5)
+
+    def test_setup_module_across_groups(self, ftdir):
+        """setup_module runs once, survives across parallel groups and sequential tests."""
+        ftdir.copy_case("xunit_setup_module_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=5)
+
+    def test_setup_method_across_groups(self, ftdir):
+        """setup_method/teardown_method fire for every method across parallel classes."""
+        ftdir.copy_case("xunit_setup_method_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=5)
