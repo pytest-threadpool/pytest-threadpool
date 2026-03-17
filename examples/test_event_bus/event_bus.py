@@ -10,76 +10,67 @@ With pytest-threadpool it's a plain Python object protected by a Lock.
 """
 
 import threading
-from typing import ClassVar
 
 
 class EventBus:
-    """Thread-safe in-memory event bus for testing."""
+    """Thread-safe in-memory event bus for testing.
 
-    _lock = threading.Lock()
-    _events: ClassVar[list[dict]] = []
-    _subscribers: ClassVar[dict[str, list]] = {}
-    _waiters: ClassVar[list[tuple[str | None, int, threading.Event]]] = []
+    Instance-based: each test scope gets its own bus via a fixture,
+    with proper setup/teardown handled by pytest's fixture lifecycle.
+    """
 
-    @classmethod
-    def publish(cls, topic: str, payload: dict) -> None:
-        with cls._lock:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._events: list[dict] = []
+        self._subscribers: dict[str, list] = {}
+        self._waiters: list[tuple[str | None, int, threading.Event]] = []
+
+    def publish(self, topic: str, payload: dict) -> None:
+        with self._lock:
             event = {"topic": topic, "payload": payload, "thread": threading.current_thread().name}
-            cls._events.append(event)
-            for callback in cls._subscribers.get(topic, []):
+            self._events.append(event)
+            for callback in self._subscribers.get(topic, []):
                 callback(event)
-            cls._check_waiters()
+            self._check_waiters()
 
-    @classmethod
-    def subscribe(cls, topic: str, callback) -> None:
-        with cls._lock:
-            cls._subscribers.setdefault(topic, []).append(callback)
+    def subscribe(self, topic: str, callback) -> None:
+        with self._lock:
+            self._subscribers.setdefault(topic, []).append(callback)
 
-    @classmethod
-    def events(cls, topic: str | None = None) -> list[dict]:
-        with cls._lock:
+    def events(self, topic: str | None = None) -> list[dict]:
+        with self._lock:
             if topic is None:
-                return list(cls._events)
-            return [e for e in cls._events if e["topic"] == topic]
+                return list(self._events)
+            return [e for e in self._events if e["topic"] == topic]
 
-    @classmethod
-    def wait_for(cls, count: int, topic: str | None = None, timeout: float = 10) -> list[dict]:
+    def wait_for(self, count: int, topic: str | None = None, timeout: float = 10) -> list[dict]:
         """Block until at least ``count`` events match, then return them."""
         ready = threading.Event()
-        with cls._lock:
-            matched = cls._filter(topic)
+        with self._lock:
+            matched = self._filter(topic)
             if len(matched) >= count:
                 return matched
-            cls._waiters.append((topic, count, ready))
+            self._waiters.append((topic, count, ready))
         if not ready.wait(timeout=timeout):
-            actual = len(cls.events(topic))
+            actual = len(self.events(topic))
             label = f"topic={topic!r}" if topic else "all topics"
             raise TimeoutError(
                 f"EventBus.wait_for: expected {count} events on {label}, "
                 f"got {actual} after {timeout}s"
             )
-        return cls.events(topic)
+        return self.events(topic)
 
-    @classmethod
-    def reset(cls) -> None:
-        with cls._lock:
-            cls._events.clear()
-            cls._subscribers.clear()
-            cls._waiters.clear()
-
-    @classmethod
-    def _check_waiters(cls) -> None:
+    def _check_waiters(self) -> None:
         """Signal any waiters whose condition is met. Must hold _lock."""
         remaining = []
-        for topic, count, event in cls._waiters:
-            if len(cls._filter(topic)) >= count:
+        for topic, count, event in self._waiters:
+            if len(self._filter(topic)) >= count:
                 event.set()
             else:
                 remaining.append((topic, count, event))
-        cls._waiters[:] = remaining
+        self._waiters[:] = remaining
 
-    @classmethod
-    def _filter(cls, topic: str | None) -> list[dict]:
+    def _filter(self, topic: str | None) -> list[dict]:
         if topic is None:
-            return list(cls._events)
-        return [e for e in cls._events if e["topic"] == topic]
+            return list(self._events)
+        return [e for e in self._events if e["topic"] == topic]
