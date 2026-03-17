@@ -61,3 +61,42 @@ class TestFixturesUnderParallel:
         assert "1 error" in result.stdout
         # The verify test proves all finalizers ran despite the exception
         assert "FAILED" not in result.stdout
+
+    def test_session_fixture_shared_across_groups(self, ftdir):
+        """Session fixture: same object across parallel groups and sequential tests."""
+        ftdir.copy_case("fixture_session_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=6)
+
+    def test_module_fixture_shared_across_groups(self, ftdir):
+        """Module-scoped fixture is the same object across parallel groups and sequential tests."""
+        ftdir.copy_case("fixture_module_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=6)
+
+    def test_class_fixture_shared_within_isolated_across(self, ftdir):
+        """Class-scoped fixture: same object within class, different across classes."""
+        ftdir.copy_case("fixture_class_across_groups")
+        result = ftdir.run_pytest("--threadpool", "3")
+        result.assert_outcomes(passed=5)
+
+    def test_package_fixture_shared_across_modules(self, ftdir):
+        """Package-scoped fixture is the same object across modules in a package group."""
+        from tests.integration_tests.cases.fixture_package_across_groups import (
+            CONFTEST_SRC,
+            INIT_SRC,
+            MOD_A_SRC,
+            MOD_B_SRC,
+            VERIFY_SRC,
+        )
+
+        pkg = ftdir.mkdir("mypkg")
+        (pkg / "__init__.py").write_text(INIT_SRC)
+        (pkg / "conftest.py").write_text(CONFTEST_SRC)
+        (pkg / "test_mod_a.py").write_text(MOD_A_SRC)
+        (pkg / "test_mod_b.py").write_text(MOD_B_SRC)
+        (ftdir.path / "test_verify.py").write_text(VERIFY_SRC)
+        result = ftdir.run_pytest(
+            "--threadpool", "4", str(pkg), str(ftdir.path / "test_verify.py")
+        )
+        result.assert_outcomes(passed=5)

@@ -356,22 +356,34 @@ class ParallelRunner:
         )
 
         needs_sep = False
-        for group_key, items in groups:
+        for group_idx, (group_key, items) in enumerate(groups):
             if session.shouldfail:
                 raise session.Failed(session.shouldfail)
             if session.shouldstop:
                 raise session.Interrupted(session.shouldstop)
 
+            # First item of the next group — tells teardown_exact which
+            # session/module/class nodes to keep alive across groups.
+            next_group_first = None
+            for _, future_items in groups[group_idx + 1 :]:
+                if future_items:
+                    next_group_first = future_items[0]
+                    break
+
             if group_key is None or len(items) <= 1 or self._nthreads <= 1:
                 for i, item in enumerate(items):
-                    nextitem = items[i + 1] if i + 1 < len(items) else None
+                    nextitem = items[i + 1] if i + 1 < len(items) else next_group_first
                     if has_parallel:
                         self._run_sequential_nodeid(item, nextitem)
                     else:
                         self._run_sequential(item, nextitem)
                 needs_sep = bool(items)
             else:
-                self._run_parallel(items, after_sequential=needs_sep)
+                self._run_parallel(
+                    items,
+                    after_sequential=needs_sep,
+                    next_group_first=next_group_first,
+                )
                 needs_sep = True
 
         return True
@@ -469,7 +481,7 @@ class ParallelRunner:
             f.write(f"\n{item.nodeid} {color}{word}{reset}")
             f.flush()
 
-    def _run_parallel(self, items, after_sequential: bool = False) -> None:
+    def _run_parallel(self, items, after_sequential: bool = False, next_group_first=None) -> None:
         """Run a group's tests with parallel fixture setup and calls.
 
         Function-scoped FixtureDefs are cloned per-item so their setup can
@@ -525,7 +537,9 @@ class ParallelRunner:
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
                 if setup_passed[item] and session.config.getoption("setupshow", False):
                     show_test_item(item)
-            self._teardown_all(items, per_item_fixture_fins, {}, saved_collector_fins)
+            self._teardown_all(
+                items, per_item_fixture_fins, {}, saved_collector_fins, next_group_first
+            )
             return
 
         # Phase 1+2: fire hooks for all items, populate shared fixture caches,
@@ -832,13 +846,20 @@ class ParallelRunner:
                 session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
 
         # Teardown reporting + collector teardown (always runs, even after interrupt)
-        self._teardown_all(items, per_item_fixture_fins, teardown_infos, saved_collector_fins)
+        self._teardown_all(
+            items, per_item_fixture_fins, teardown_infos, saved_collector_fins, next_group_first
+        )
 
         if interrupted:
             raise KeyboardInterrupt
 
     def _teardown_all(
-        self, items, per_item_fixture_fins, teardown_infos, saved_collector_fins
+        self,
+        items,
+        per_item_fixture_fins,
+        teardown_infos,
+        saved_collector_fins,
+        next_group_first=None,
     ) -> None:
         """Report teardown results, run any remaining finalizers, and tear down
         collectors.
@@ -846,6 +867,10 @@ class ParallelRunner:
         For items with pre-computed teardown_infos (from parallel workers),
         only reporting happens here.  For items without (setuponly mode),
         finalizers from per_item_fixture_fins are executed sequentially.
+
+        next_group_first: first item of the next group (or None if last group).
+        Passed to teardown_exact so session/module/class-scoped fixtures that
+        are still needed by the next group are preserved rather than torn down.
         """
         session = self._session
 
@@ -882,7 +907,9 @@ class ParallelRunner:
             item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
 
         # noinspection PyProtectedMember
-        session._setupstate.teardown_exact(nextitem=None)  # pyright: ignore[reportPrivateUsage]
+        # Pass next_group_first so session/module/class nodes needed by the
+        # next group stay in the stack with their cached fixtures intact.
+        session._setupstate.teardown_exact(nextitem=next_group_first)  # pyright: ignore[reportPrivateUsage]
 
         exceptions = []
         for _node, fins in reversed(saved_collector_fins):
