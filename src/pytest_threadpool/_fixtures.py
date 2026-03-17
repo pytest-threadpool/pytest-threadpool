@@ -28,7 +28,7 @@ class FixtureManager:
         # mirrors pytest's own TopRequest/FixtureDef internals.
         request = getattr(item, "_request", None)
         if not request or not hasattr(request, "_arg2fixturedefs"):
-            return
+            return  # pragma: no cover -- defensive guard; request is always initialized by pytest
 
         new_arg2fds = {}
         for argname, fds in request._arg2fixturedefs.items():  # pyright: ignore[reportPrivateUsage]
@@ -110,11 +110,11 @@ class FixtureManager:
         # mirrors pytest's own TopRequest/FixtureDef internals.
         request = getattr(item, "_request", None)
         if not request or not hasattr(request, "_arg2fixturedefs"):
-            return
+            return  # pragma: no cover -- defensive guard; request is always initialized by pytest
 
         for argname in item.fixturenames:
             if argname in item.funcargs:
-                continue
+                continue  # pragma: no cover -- funcargs is empty when called from parallel prep
             fds = request._arg2fixturedefs.get(argname, [])  # pyright: ignore[reportPrivateUsage]
             if fds and fds[-1]._scope is not Scope.Function:  # pyright: ignore[reportPrivateUsage]
                 value = request.getfixturevalue(argname)

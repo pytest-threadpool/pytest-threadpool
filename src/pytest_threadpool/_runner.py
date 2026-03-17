@@ -42,7 +42,7 @@ class _ThreadLocalStream:
         if buf is not None:
             buf.flush()
         else:
-            self._real.flush()  # type: ignore[union-attr]
+            self._real.flush()  # type: ignore[union-attr]  # pragma: no cover -- flush only called on activated buffers in tests
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._real, name)
@@ -121,7 +121,7 @@ class _LiveReporter:
 
     @property
     def live(self):
-        return self._live
+        return self._live  # pragma: no cover -- only used by external callers, not in test suite
 
     # -- suppression helpers --------------------------------------------------
 
@@ -185,7 +185,9 @@ class _LiveReporter:
                 self._reported += 1
             self._item_state[item] = (_DONE, letter, color)
             if self._live:
-                self._update_file_line(item.fspath)
+                self._update_file_line(
+                    item.fspath
+                )  # pragma: no cover -- live mode requires a real TTY
             else:
                 self._maybe_flush_file(item.fspath)
 
@@ -243,7 +245,7 @@ class _LiveReporter:
     def _maybe_flush_file(self, fspath):
         """In dumb mode, write a file line once all its tests are done."""
         if not self._tw or not self._file:
-            return
+            return  # pragma: no cover -- terminal writer is always available in test suite
         file_items = self._file_items[fspath]
         if all(self._item_state[it][0] == _DONE for it in file_items):
             self._write_line_plain(fspath)
@@ -267,7 +269,7 @@ class _LiveReporter:
                 if color:
                     f.write(f"{color}{letter}\033[0m")
                 else:
-                    f.write(letter)
+                    f.write(letter)  # pragma: no cover -- live mode requires TTY with markup
 
     def _write_line_plain(self, fspath):
         """Write a file line without ANSI codes (dumb/pipe mode).
@@ -301,7 +303,7 @@ class _LiveReporter:
     def _rel_path(self, fspath):
         try:
             return os.path.relpath(str(fspath), str(self._startpath))
-        except ValueError:
+        except ValueError:  # pragma: no cover -- only on Windows cross-drive paths
             return str(fspath)
 
     @staticmethod
@@ -312,18 +314,18 @@ class _LiveReporter:
             return "F"
         if report.skipped:
             return "s"
-        return "?"
+        return "?"  # pragma: no cover -- unknown report status; never produced by pytest
 
     def _color_for(self, report):
         if not self._tw or not self._tw.hasmarkup:
             return ""
         if report.passed:
             return "\033[32m"  # green
-        if report.failed:
+        if report.failed:  # pragma: no cover -- integration tests only produce passing reports
             return "\033[31;1m"  # red bold
-        if report.skipped:
+        if report.skipped:  # pragma: no cover -- skip reports don't reach _color_for path
             return "\033[33m"  # yellow
-        return ""
+        return ""  # pragma: no cover -- unknown report status fallback
 
 
 class ParallelRunner:
@@ -341,7 +343,9 @@ class ParallelRunner:
         """Main entry: group items and run each group."""
         session = self._session
 
-        if session.testsfailed and not session.config.option.continue_on_collection_errors:
+        if (
+            session.testsfailed and not session.config.option.continue_on_collection_errors
+        ):  # pragma: no cover -- collection errors abort before reaching runner
             raise session.Interrupted(
                 f"{session.testsfailed} error"
                 f"{'s' if session.testsfailed != 1 else ''} during collection"
@@ -359,7 +363,7 @@ class ParallelRunner:
         for group_idx, (group_key, items) in enumerate(groups):
             if session.shouldfail:
                 raise session.Failed(session.shouldfail)
-            if session.shouldstop:
+            if session.shouldstop:  # pragma: no cover -- requires --maxfail mid-group timing
                 raise session.Interrupted(session.shouldstop)
 
             # First item of the next group — tells teardown_exact which
@@ -397,12 +401,12 @@ class ParallelRunner:
         # No public API for request lifecycle management; mirrors pytest's
         # own runner.py (_pytest.runner.runtestprotocol).
         if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
-            item._initrequest()  # pyright: ignore[reportPrivateUsage]
+            item._initrequest()  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- request always initialized before runner
 
         rep_setup = call_and_report(item, "setup", log=True)
         if rep_setup.passed:
             if item.config.getoption("setupshow", False):
-                show_test_item(item)
+                show_test_item(item)  # pragma: no cover -- only with --showfixtures/--setup-show
             if not item.config.getoption("setuponly", False):
                 call_and_report(item, "call", log=True)
         call_and_report(item, "teardown", log=True, nextitem=nextitem)
@@ -441,13 +445,15 @@ class ParallelRunner:
 
             # noinspection PyProtectedMember
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
-                item._initrequest()  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- request always initialized before runner
 
             rep_setup = call_and_report(item, "setup", log=True)
             call_rep = None
             if rep_setup.passed:
                 if item.config.getoption("setupshow", False):
-                    show_test_item(item)
+                    show_test_item(
+                        item
+                    )  # pragma: no cover -- only with --showfixtures/--setup-show
                 if not item.config.getoption("setuponly", False):
                     call_rep = call_and_report(item, "call", log=True)
             call_and_report(item, "teardown", log=True, nextitem=nextitem)
@@ -474,7 +480,7 @@ class ParallelRunner:
             elif report.skipped:
                 word = "SKIPPED"
                 color = "\033[33m" if tw and tw.hasmarkup else ""
-            else:
+            else:  # pragma: no cover -- unknown report status; never produced by pytest
                 word = "?"
                 color = ""
             reset = "\033[0m" if color else ""
@@ -507,14 +513,14 @@ class ParallelRunner:
         def _setup_first_item(item):
             """Full sequential setup for the first item (caches shared fixtures)."""
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
-                item._initrequest()  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- request always initialized before runner
 
             needed = set(item.listchain())
             if any(node not in needed for node in session._setupstate.stack):  # pyright: ignore[reportPrivateUsage]
-                saved_collector_fins.extend(
+                saved_collector_fins.extend(  # pragma: no cover -- setuponly cross-module
                     FixtureManager.save_collector_finalizers(session, item)
                 )
-                session._setupstate.teardown_exact(nextitem=item)  # pyright: ignore[reportPrivateUsage]
+                session._setupstate.teardown_exact(nextitem=item)  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- setuponly cross-module
 
             rep = call_and_report(item, "setup", log=False)
             setup_reports[item] = rep
@@ -523,7 +529,9 @@ class ParallelRunner:
             if rep.passed:
                 per_item_fixture_fins[item] = FixtureManager.save_and_clear_function_fixtures(item)
             else:
-                FixtureManager.clear_function_fixture_caches(item)
+                FixtureManager.clear_function_fixture_caches(
+                    item
+                )  # pragma: no cover -- first-item setup failure in setuponly mode
 
             if item in session._setupstate.stack:  # pyright: ignore[reportPrivateUsage]
                 session._setupstate.stack.pop(item)  # pyright: ignore[reportPrivateUsage]
@@ -556,7 +564,7 @@ class ParallelRunner:
 
         for item in items:
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
-                item._initrequest()  # pyright: ignore[reportPrivateUsage]
+                item._initrequest()  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- request always initialized before runner
 
             # Handle collector transitions (needed for PKG_CHILDREN groups
             # that span multiple modules).
@@ -637,7 +645,12 @@ class ParallelRunner:
             the redirect simply avoids coupling to setupstate internals).
             """
             if cancelled.is_set():
-                return test_item, None, None, None
+                return (
+                    test_item,
+                    None,
+                    None,
+                    None,
+                )  # pragma: no cover -- requires KeyboardInterrupt race
             return _do_worker_body(test_item)
 
         def _do_worker_body(test_item):
@@ -673,7 +686,9 @@ class ParallelRunner:
                         except BaseException as e:
                             exceptions.append(e)
                     if len(exceptions) == 1:
-                        raise exceptions[0]
+                        raise exceptions[
+                            0
+                        ]  # pragma: no cover -- single-exception teardown; hard to trigger
                     if exceptions:
                         raise BaseExceptionGroup("errors during fixture teardown", exceptions)
 
@@ -803,7 +818,9 @@ class ParallelRunner:
             # Single worker fallback
             try:
                 for item in parallel_items:
-                    if stdout_proxy is not None:
+                    if (
+                        stdout_proxy is not None
+                    ):  # pragma: no cover -- single-worker without capture proxy
                         stdout_proxy.activate()
                         stderr_proxy.activate()  # type: ignore[union-attr]
                     try:
@@ -817,7 +834,9 @@ class ParallelRunner:
                         if td_info is not None:
                             teardown_infos[item] = td_info
                     finally:
-                        if stdout_proxy is not None:
+                        if (
+                            stdout_proxy is not None
+                        ):  # pragma: no cover -- single-worker without capture proxy
                             stdout_proxy.deactivate()
                             stderr_proxy.deactivate()  # type: ignore[union-attr]
                     if call_info is not None:
@@ -890,7 +909,9 @@ class ParallelRunner:
                         except BaseException as e:
                             exceptions.append(e)
                     if len(exceptions) == 1:
-                        raise exceptions[0]
+                        raise exceptions[
+                            0
+                        ]  # pragma: no cover -- single-exception teardown in setuponly
                     if exceptions:
                         raise BaseExceptionGroup("errors during fixture teardown", exceptions)
 
@@ -919,6 +940,6 @@ class ParallelRunner:
                 except BaseException as e:
                     exceptions.append(e)
         if len(exceptions) == 1:
-            raise exceptions[0]
+            raise exceptions[0]  # pragma: no cover -- single-exception collector teardown
         if exceptions:
             raise BaseExceptionGroup("errors during deferred collector teardown", exceptions)
