@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6
+
+### Fixes
+
+- Fixed session, module, and class-scoped fixtures being torn down and
+  re-created between parallel groups instead of being resolved once and
+  shared for their entire scope. The same fix applies to xunit-style
+  `setup_module`/`setup_class` hooks.
+
 ## 0.3.5
 
 ### Fixes
