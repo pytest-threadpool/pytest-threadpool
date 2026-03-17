@@ -197,8 +197,8 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
     thread-local stream proxies). Pass `-s` (`--capture=no`) to disable
     suppression and see interleaved output.
   - **Logging** — Use a per-test `FileHandler` writing to `tmp_path`, or
-    collect structured records in a shared thread-safe list (see
-    [`examples/test_logging/`](examples/test_logging/)).
+    collect structured records in a shared thread-safe collection keyed by
+    test name (see [`examples/test_logging/`](examples/test_logging/)).
 
 ## License
 
