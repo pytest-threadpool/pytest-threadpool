@@ -13,12 +13,33 @@ Queue acts as a thread-safe resource pool with zero overhead:
 - 5th test blocks on Queue.get() until one finishes and returns its user
 """
 
+from queue import LifoQueue
 from time import sleep
 
 import pytest
 
 
-class TestCase1:
+class TestQueue:
+    @pytest.fixture(scope="class")
+    def user_pool(self):
+        """Imitating a resource pool, putting it into a queue."""
+        user_pool = LifoQueue(4)
+        for i in ["John", "Peter", "Jane", "Maxwell"]:
+            user_pool.put(i)
+        return user_pool
+
+    @pytest.fixture
+    def test_data(self, user_pool):
+        """Get a user from the pool for this test, return it on teardown.
+
+        Pool has 4 users but 5 tests run in parallel. The 5th test blocks
+        on Queue.get() until one of the first 4 finishes (after 1s sleep)
+        and returns its user via teardown.
+        """
+        user = user_pool.get(timeout=5)
+        yield user
+        user_pool.put(user, timeout=5)
+
     @pytest.mark.parametrize("tc_id", [1, 2, 3, 4, 5])
     def test(self, test_data, tc_id):
         """4 users in the pool, 5 tests in parallel.
