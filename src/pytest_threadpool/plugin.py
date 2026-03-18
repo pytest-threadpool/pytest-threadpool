@@ -5,6 +5,7 @@ import warnings
 
 import pytest
 
+from pytest_threadpool import hooks as threadpool_hooks
 from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLEL_ONLY,
@@ -12,6 +13,10 @@ from pytest_threadpool._constants import (
 )
 from pytest_threadpool._markers import MarkerResolver
 from pytest_threadpool._runner import ParallelRunner
+
+
+def pytest_addhooks(pluginmanager):
+    pluginmanager.add_hookspecs(threadpool_hooks)
 
 
 def pytest_addoption(parser):

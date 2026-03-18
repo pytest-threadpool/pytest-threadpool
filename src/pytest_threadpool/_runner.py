@@ -6,11 +6,24 @@ import queue
 import sys
 import threading
 from collections import OrderedDict
+from datetime import UTC, datetime
 
 from _pytest.runner import CallInfo, call_and_report, show_test_item
 
 from pytest_threadpool._fixtures import FixtureManager
 from pytest_threadpool._grouping import GroupKeyBuilder
+
+
+def _tc_escape(text: str) -> str:
+    """Escape text for TeamCity service message values."""
+    return (
+        text.replace("|", "||")
+        .replace("'", "|'")
+        .replace("\n", "|n")
+        .replace("\r", "|r")
+        .replace("[", "|[")
+        .replace("]", "|]")
+    )
 
 
 class _ThreadLocalStream:
@@ -30,8 +43,11 @@ class _ThreadLocalStream:
     def activate(self) -> None:
         self._local.buf = io.StringIO()
 
-    def deactivate(self) -> None:
+    def deactivate(self) -> str:
+        """Stop buffering and return captured content."""
+        buf = getattr(self._local, "buf", None)
         self._local.buf = None
+        return buf.getvalue() if buf else ""
 
     def write(self, s: str) -> int:
         buf = getattr(self._local, "buf", None)
@@ -72,6 +88,9 @@ class _LiveReporter:
       - done:      colored result letter (./F/s)
 
     Falls back to plain immediate reporting when stdout is not a terminal.
+    In passive mode (``-s`` without a live TTY), delegates entirely to
+    pytest's standard terminal reporter so IDE runners receive the
+    output they rely on for result detection.
     """
 
     def __init__(self, session, items):
@@ -111,6 +130,16 @@ class _LiveReporter:
             and self._tw.hasmarkup
             and session.config.get_verbosity() <= 0
         )
+
+        # Passive mode: when capture is disabled (``-s``) and we're not
+        # on a live TTY, let pytest's standard reporter handle output.
+        # This keeps IDE test runners (PyCharm, VS Code, etc.) working
+        # because they rely on the terminal reporter's output to detect
+        # test results.
+        capture = session.config.getoption("capture", "fd")
+        self._passive = not self._live and capture == "no"
+        self._tc = bool(session.config.getoption("teamcity", 0))
+
         self._width = getattr(self._tw, "fullwidth", 80) if self._tw else 80
         # noinspection PyProtectedMember
         # No public accessor on TerminalWriter for the underlying file handle.
@@ -118,9 +147,9 @@ class _LiveReporter:
         # that bypass TerminalWriter formatting.
         self._file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
 
-        # Track whether dumb mode has written any file lines, so we
-        # know when to prefix with \n for line separation.
-        self._dumb_needs_sep = False
+        # When True, the next dumb-mode file line prefixes with \n
+        # to separate from preceding sequential output.
+        self._needs_leading_newline = False
 
         # Pre-compute colors for worker-thread display updates
         markup = self._tw.hasmarkup if self._tw else False
@@ -131,10 +160,31 @@ class _LiveReporter:
     def live(self):
         return self._live  # pragma: no cover -- only used by external callers, not in test suite
 
+    @property
+    def passive(self):
+        return self._passive
+
+    def passive_color(self, report) -> str:
+        """Return ANSI color for the result word in passive mode."""
+        if not self._tw or not self._tw.hasmarkup:
+            return ""
+        if report.passed:
+            return _GREEN
+        if report.failed:
+            return _RED_BOLD
+        if report.skipped:
+            return _YELLOW
+        return ""
+
     # -- suppression helpers --------------------------------------------------
 
     def suppress(self):
-        """Temporarily suppress terminal reporter output."""
+        """Temporarily suppress terminal reporter output.
+
+        Only suppresses ``_tw.write``/``_tw.line``.  IDE reporters
+        (TeamCity / PyCharm) write directly to ``sys.stdout``, so
+        their output passes through unaffected.
+        """
         if self._tw:
             self._orig_write = self._tw.write
             self._orig_line = self._tw.line
@@ -196,7 +246,7 @@ class _LiveReporter:
                 self._update_file_line(
                     item.fspath
                 )  # pragma: no cover -- live mode requires a real TTY
-            else:
+            elif not self._passive and not self._tc:
                 self._maybe_flush_file(item.fspath)
 
     def mark_call_done(self, item, excinfo):
@@ -215,11 +265,13 @@ class _LiveReporter:
             self._item_state[item] = (_DONE, letter, color)
             if self._live:
                 self._update_file_line(item.fspath)
-            else:
+            elif not self._passive and not self._tc:
                 self._maybe_flush_file(item.fspath)
 
     def finish(self):
         """Reset terminal reporter state after live output."""
+        if self._passive:
+            return
         if self._live and self._tw and self._file:
             # End the progress line and move cursor back up so the
             # terminal reporter's next _tw.line() call (from
@@ -250,14 +302,6 @@ class _LiveReporter:
         self._write_progress_line()
         f.flush()
 
-    def _maybe_flush_file(self, fspath):
-        """In dumb mode, write a file line once all its tests are done."""
-        if not self._tw or not self._file:
-            return  # pragma: no cover -- terminal writer is always available in test suite
-        file_items = self._file_items[fspath]
-        if all(self._item_state[it][0] == _DONE for it in file_items):
-            self._write_line_plain(fspath)
-
     def _write_line_live(self, fspath):
         """Write a file line with ANSI formatting (live terminal mode)."""
         assert self._file is not None
@@ -279,13 +323,16 @@ class _LiveReporter:
                 else:
                     f.write(letter)  # pragma: no cover -- live mode requires TTY with markup
 
-    def _write_line_plain(self, fspath):
-        """Write a file line without ANSI codes (dumb/pipe mode).
+    def _maybe_flush_file(self, fspath):
+        """In dumb mode, write a file line once all its tests are done."""
+        if not self._tw or not self._file:
+            return  # pragma: no cover -- terminal writer is always available in test suite
+        file_items = self._file_items[fspath]
+        if all(self._item_state[it][0] == _DONE for it in file_items):
+            self._write_line_plain(fspath)
 
-        No trailing newline: subsequent calls prefix with \\n for line
-        separation.  This lets the terminal reporter's write_fspath_result
-        naturally end the last line without creating a blank line.
-        """
+    def _write_line_plain(self, fspath):
+        """Write a file line without ANSI codes (dumb/pipe mode)."""
         assert self._file is not None
         f = self._file
         rel = self._rel_path(fspath)
@@ -293,10 +340,10 @@ class _LiveReporter:
 
         letters = "".join(self._item_state[item][1] for item in self._file_items[fspath])
 
-        sep = "\n" if self._dumb_needs_sep else ""
-        f.write(f"{sep}{rel} {letters}{progress}")
+        prefix = "\n" if self._needs_leading_newline else ""
+        self._needs_leading_newline = False
+        f.write(f"{prefix}{rel} {letters}{progress}\n")
         f.flush()
-        self._dumb_needs_sep = True
 
     def _write_progress_line(self):
         """Write/update the progress line at the bottom."""
@@ -568,6 +615,21 @@ class ParallelRunner:
         parallel_items = []
         shared_populated_modules: set = set()
 
+        # Shared-scope fixture output (setup_session, setup_module, etc.)
+        # is produced during phase 1+2 ``call_and_report`` for the first
+        # item per module.  That hook_rep is later discarded (workers
+        # create fresh setup reports), so the captured sections are lost.
+        #
+        # With default capture, pytest stores the output in hook_rep.sections.
+        # With ``-s``, pytest's capture is off and output leaks to raw stdout.
+        #
+        # We preserve the sections (default mode) and manually redirect
+        # stdout (``-s`` mode) so setup output can be re-attached to the
+        # setup report in ``_report_item``.
+        capture_option = session.config.getoption("capture", "fd")
+        capture_setup_redirect = capture_option == "no" and self._nthreads > 1 and len(items) > 1
+        setup_captured_sections: dict[object, list] = {}
+
         for item in items:
             if hasattr(item, "_request") and not item._request:  # pyright: ignore[reportPrivateUsage]
                 item._initrequest()  # pyright: ignore[reportPrivateUsage]  # pragma: no cover -- request always initialized before runner
@@ -593,10 +655,37 @@ class ParallelRunner:
                 item.setup = lambda i=item: FixtureManager.populate_shared_fixtures(i)
             else:
                 item.setup = lambda: None
+
+            # In ``-s`` mode, temporarily redirect stdout/stderr to capture
+            # shared-scope fixture output that would otherwise leak to raw
+            # stdout.  In default capture mode, pytest captures into
+            # hook_rep.sections which we preserve below.
+            saved_out = saved_err = None
+            buf_out = buf_err = None
+            if capture_setup_redirect:
+                saved_out, saved_err = sys.stdout, sys.stderr
+                buf_out, buf_err = io.StringIO(), io.StringIO()
+                sys.stdout, sys.stderr = buf_out, buf_err  # type: ignore[assignment]
             try:
                 hook_rep = call_and_report(item, "setup", log=False)
             finally:
                 item.setup = original_setup
+                if capture_setup_redirect:
+                    sys.stdout, sys.stderr = saved_out, saved_err  # type: ignore[assignment]
+
+            # Preserve captured sections from hook_rep (filled by pytest's
+            # capture in default mode).  In ``-s`` mode, add our manually
+            # redirected output as sections instead.
+            sections = list(hook_rep.sections) if hook_rep.sections else []
+            if buf_out is not None:
+                setup_out = buf_out.getvalue()
+                setup_err = buf_err.getvalue()  # type: ignore[union-attr]
+                if setup_out:
+                    sections.append(("Captured stdout setup", setup_out))
+                if setup_err:
+                    sections.append(("Captured stderr setup", setup_err))
+            if sections:
+                setup_captured_sections[item] = sections
 
             # Pop item from setupstate (pushed by _setupstate.setup inside the
             # hook) so the next item's hook doesn't fail the stack assertion.
@@ -627,7 +716,7 @@ class ParallelRunner:
         reported = set()
         live = _LiveReporter(session, items)
         if after_sequential:
-            live._dumb_needs_sep = True
+            live._needs_leading_newline = True
         live.pre_print()
 
         cancelled = threading.Event()
@@ -702,13 +791,75 @@ class ParallelRunner:
                     call_info = call_results[item]
                     call_rep = ihook.pytest_runtest_makereport(item=item, call=call_info)
 
+                # Let plugins handle captured output first via hook.
+                # If hook returns True, skip default output handling.
+                out, err = captured_output.get(item, ("", ""))
+                handled = any(
+                    session.config.pluginmanager.hook.pytest_threadpool_report(
+                        item=item,
+                        report=call_rep or setup_reports[item],
+                        captured_out=out,
+                        captured_err=err,
+                    )
+                )
+
+                # Attach captured worker output to the report.
+                # For failures, pytest displays sections automatically.
+                if not handled and call_rep is not None:
+                    if out:
+                        call_rep.sections.append(("Captured stdout call", out))
+                    if err:
+                        call_rep.sections.append(("Captured stderr call", err))
+
                 report = call_rep or setup_reports[item]
+
+                # Strip shared-scope captured sections from setup report.
+                # CaptureManager re-adds captured output from phase 1+2
+                # (session/package/module/class setup) to the worker's
+                # setup report.  Remove those sections so they don't
+                # appear in the first test's report in IDE reporters.
+                if item in setup_captured_sections:
+                    shared_content = {
+                        sec_content for _, sec_content in setup_captured_sections[item]
+                    }
+                    setup_reports[item].sections = [
+                        (name, content)
+                        for name, content in setup_reports[item].sections
+                        if content not in shared_content
+                    ]
 
                 ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
                 ihook.pytest_runtest_logreport(report=setup_reports[item])
                 if setup_passed[item]:
                     if session.config.getoption("setupshow", False):
                         show_test_item(item)
+
+                    # In passive mode (``-s``), re-emit the result line
+                    # and captured output via real stdout since ``_tw`` is
+                    # suppressed and pytest's own capture is disabled.
+                    # In dumb mode (default capture, no TTY), the file line
+                    # already shows results and pytest captures output.
+                    if live.passive:
+                        real_out = stdout_proxy._real if stdout_proxy else sys.stdout
+                        word = report.outcome.upper()
+                        color = live.passive_color(report)
+                        if color:
+                            result_text = f"{item.nodeid} {color}{word}{_RESET}"
+                        else:
+                            result_text = f"{item.nodeid} {word}"
+                        real_out.write(f"\n{result_text}\n")  # type: ignore[union-attr]
+
+                        if not handled:
+                            real_err = stderr_proxy._real if stderr_proxy else sys.stderr
+                            if out:
+                                real_out.write(out)  # type: ignore[union-attr]
+                                if not out.endswith("\n"):
+                                    real_out.write("\n")  # type: ignore[union-attr]
+                            if err:
+                                real_err.write(err)  # type: ignore[union-attr]
+                                if not err.endswith("\n"):
+                                    real_err.write("\n")  # type: ignore[union-attr]
+
                     if call_rep is not None:
                         ihook.pytest_runtest_logreport(report=call_rep)
             finally:
@@ -718,21 +869,56 @@ class ParallelRunner:
             reported.add(item)
 
         teardown_infos = {}
+        captured_output: dict = {}
 
         # Install thread-local stream proxies so worker print() output
-        # doesn't corrupt test result lines.  In live mode this prevents
-        # ANSI cursor corruption; in verbose/dumb mode it prevents
-        # interleaved output on the same line as test results.
-        # Each worker activates its own buffer; the main thread and
-        # reporter writes pass through to the real streams.
+        # doesn't corrupt test result lines.  Always installed (even
+        # with ``-s``) so captured output can be reported alongside
+        # the test result instead of leaking into global stdout.
         stdout_proxy: _ThreadLocalStream | None = None
         stderr_proxy: _ThreadLocalStream | None = None
-        capture_option = session.config.getoption("capture", "fd")
-        if workers > 1 and len(parallel_items) > 1 and capture_option != "no":
+        if workers > 1 and len(parallel_items) > 1:
             stdout_proxy = _ThreadLocalStream(sys.stdout)
             stderr_proxy = _ThreadLocalStream(sys.stderr)
             sys.stdout = stdout_proxy  # type: ignore[assignment]
             sys.stderr = stderr_proxy  # type: ignore[assignment]
+
+        tc_active = bool(session.config.getoption("teamcity", 0))
+
+        def _emit_tc_message(text: str) -> None:
+            """Emit a TeamCity message event to the real stdout."""
+            real_out = stdout_proxy._real if stdout_proxy else sys.stdout
+            ts = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            real_out.write(  # type: ignore[union-attr]
+                f"##teamcity[message timestamp='{ts}' text='{_tc_escape(text)}' status='NORMAL']\n"
+            )
+
+        def _emit_shared_setup_sections():
+            """Emit shared-scope fixture output before any test is reported.
+
+            In passive mode (``-s``): writes captured setup sections
+            (session, package, module, class) to real stdout/stderr so they
+            appear at the scope level, not inside the first test's output.
+
+            In TeamCity mode (default capture): emits captured setup
+            sections as ``##teamcity[message]`` events so they appear at
+            the suite level in IDE test runners rather than inside an
+            individual test's output.
+            """
+            if not live.passive and not tc_active:
+                return
+            real_out = stdout_proxy._real if stdout_proxy else sys.stdout
+            real_err = stderr_proxy._real if stderr_proxy else sys.stderr
+            for item in parallel_items:
+                sections = setup_captured_sections.get(item, [])
+                for sec_name, sec_content in sections:
+                    if tc_active and not live.passive:
+                        _emit_tc_message(sec_content)
+                    else:
+                        target = real_err if "stderr" in sec_name else real_out
+                        target.write(sec_content)  # type: ignore[union-attr]
+                        if not sec_content.endswith("\n"):
+                            target.write("\n")  # type: ignore[union-attr]
 
         interrupted = False
         if workers > 1 and len(parallel_items) > 1:
@@ -777,8 +963,10 @@ class ParallelRunner:
                         result_queue.put((work_item, call_info))
                     finally:
                         if stdout_proxy is not None:
-                            stdout_proxy.deactivate()
-                            stderr_proxy.deactivate()  # type: ignore[union-attr]
+                            out = stdout_proxy.deactivate()
+                            err = stderr_proxy.deactivate()  # type: ignore[union-attr]
+                            if out or err:
+                                captured_output[work_item] = (out, err)
 
             threads = []
             for _ in range(workers):
@@ -790,14 +978,39 @@ class ParallelRunner:
             for item in parallel_items:
                 work_queue.put(item)
 
+            # Emit shared-scope fixture output (setup_session, etc.)
+            # before any test is reported so it appears at the scope
+            # level, not inside the first test.
+            _emit_shared_setup_sections()
+
             try:
                 collected = 0
-                while collected < len(parallel_items):
-                    finished_item, call_info = result_queue.get()
-                    if call_info is not None:
-                        call_results[finished_item] = call_info
-                    _report_item(finished_item)
-                    collected += 1
+                if tc_active:
+                    # In TC/IDE mode, report in collection order so
+                    # parametrized tests are grouped correctly.
+                    ready = set()
+                    next_report_idx = 0
+                    while collected < len(parallel_items):
+                        finished_item, call_info = result_queue.get()
+                        if call_info is not None:
+                            call_results[finished_item] = call_info
+                        ready.add(finished_item)
+                        collected += 1
+                        while (
+                            next_report_idx < len(parallel_items)
+                            and parallel_items[next_report_idx] in ready
+                        ):
+                            _report_item(parallel_items[next_report_idx])
+                            next_report_idx += 1
+                else:
+                    # In terminal mode, report in completion order for
+                    # immediate feedback (fast tests show before slow ones).
+                    while collected < len(parallel_items):
+                        finished_item, call_info = result_queue.get()
+                        if call_info is not None:
+                            call_results[finished_item] = call_info
+                        _report_item(finished_item)
+                        collected += 1
             except KeyboardInterrupt:
                 interrupted = True
                 cancelled.set()
@@ -809,6 +1022,7 @@ class ParallelRunner:
                     t.join()
         else:
             # Single worker fallback
+            _emit_shared_setup_sections()
             try:
                 for item in parallel_items:
                     if (
@@ -859,7 +1073,13 @@ class ParallelRunner:
 
         # Teardown reporting + collector teardown (always runs, even after interrupt)
         self._teardown_all(
-            items, per_item_fixture_fins, teardown_infos, saved_collector_fins, next_group_first
+            items,
+            per_item_fixture_fins,
+            teardown_infos,
+            saved_collector_fins,
+            next_group_first,
+            passive=live.passive,
+            tc_active=tc_active,
         )
 
         if interrupted:
@@ -872,6 +1092,8 @@ class ParallelRunner:
         teardown_infos,
         saved_collector_fins,
         next_group_first=None,
+        passive: bool = False,
+        tc_active: bool = False,
     ) -> None:
         """Report teardown results, run any remaining finalizers, and tear down
         collectors.
@@ -910,7 +1132,40 @@ class ParallelRunner:
         # noinspection PyProtectedMember
         # Pass next_group_first so session/module/class nodes needed by the
         # next group stay in the stack with their cached fixtures intact.
-        session._setupstate.teardown_exact(nextitem=next_group_first)  # pyright: ignore[reportPrivateUsage]
+        #
+        # Shared-scope fixture teardown (session/package/module/class)
+        # runs here.  In ``-s`` mode the output would leak to raw stdout;
+        # in default capture mode it leaks because our proxy is already
+        # restored.  Redirect stdout/stderr to capture the output so it
+        # can be emitted in passive mode and suppressed otherwise.
+        td_saved_out, td_saved_err = sys.stdout, sys.stderr
+        td_buf_out, td_buf_err = io.StringIO(), io.StringIO()
+        sys.stdout, sys.stderr = td_buf_out, td_buf_err  # type: ignore[assignment]
+        try:
+            session._setupstate.teardown_exact(nextitem=next_group_first)  # pyright: ignore[reportPrivateUsage]
+        finally:
+            sys.stdout, sys.stderr = td_saved_out, td_saved_err  # type: ignore[assignment]
+
+        # In passive mode, emit the captured teardown output so it
+        # appears after all tests in the output.  In TeamCity mode,
+        # emit as ##teamcity[message] events for suite-level display.
+        td_out = td_buf_out.getvalue()
+        td_err = td_buf_err.getvalue()
+        if passive:
+            if td_out:
+                td_saved_out.write(td_out)
+                if not td_out.endswith("\n"):
+                    td_saved_out.write("\n")
+            if td_err:
+                td_saved_err.write(td_err)
+                if not td_err.endswith("\n"):
+                    td_saved_err.write("\n")
+        elif tc_active and td_out:
+            ts = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            td_saved_out.write(
+                f"##teamcity[message timestamp='{ts}'"
+                f" text='{_tc_escape(td_out)}' status='NORMAL']\n"
+            )
 
         all_collector_fins = [
             fin for _node, fins in reversed(saved_collector_fins) for fin in reversed(fins)

@@ -208,12 +208,28 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
   the same time" when requested by parallel tests. `caplog` leaks records
   across fixtures and its `at_level()` context managers race on the shared
   root logger. Alternatives:
-  - **`print()`** — Worker output is suppressed by default (buffered by
-    thread-local stream proxies). Pass `-s` (`--capture=no`) to disable
-    suppression and see interleaved output.
+  - **`print()`** — Worker output is buffered by thread-local stream
+    proxies and reported alongside each test's result. In default capture
+    mode, output appears in "Captured stdout call" sections on failure.
+    With `-vs` (`--capture=no -v`), captured output is emitted after the
+    PASSED/FAILED line for each test. TTY mode (default without `-s`)
+    suppresses print output; use `-vs` to see it. A TTY-friendly output
+    viewer with switchable per-thread/per-test frames is planned (see
+    [ROADMAP](ROADMAP.md)).
+  - **IDE and CI runners (PyCharm, TeamCity, VS Code)** — Each test's
+    function-scoped setup, call, and teardown output appears in its own
+    report. Shared fixture output (session/package/module/class setup
+    and teardown) is emitted at the suite level, not inside individual
+    tests. Parametrized tests are reported in collection order so
+    runners group them correctly. Works via the `teamcity-messages`
+    plugin (`--teamcity` flag); PyCharm and TeamCity CI use the same
+    protocol.
   - **Logging** — Use a per-test `FileHandler` writing to `tmp_path`, or
     collect structured records in a shared thread-safe collection keyed by
     test name (see [`examples/test_logging/`](examples/test_logging/)).
+  - **Custom output hook** — Implement `pytest_threadpool_report` in a
+    conftest or plugin to customize how captured worker output is handled.
+    Return `True` to suppress the default output handling.
 
 ## License
 

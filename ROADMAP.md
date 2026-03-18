@@ -10,13 +10,19 @@ interleaves and pytest raises "cannot use capsys and capsys at the same time".
 `caplog` leaks records across tests, and `at_level()` context managers race on the
 shared root logger.
 
-**Approach:** Delayed replay — collect output per-worker during parallel execution,
-then feed it back one item at a time during the sequential reporting phase.
+**Current state:** Worker stdout/stderr is already captured per-item by
+`_ThreadLocalStream` and associated with the test item via `captured_output`.
+The `deactivate()` method returns buffered content, which is attached to
+`report.sections` and (in passive/`-s` mode) emitted to real stdout after
+the result line. A `pytest_threadpool_report` hook allows plugins to
+customize output handling.
 
-- **capsys/capfd:** The `_ThreadLocalStream` proxy already buffers worker output
-  into per-thread `StringIO`. Instead of discarding on `deactivate()`, associate
-  each buffer with its test item and flush to the real stream before
-  `pytest_runtest_makereport` reads the capture.
+**Remaining work:**
+
+- **capsys/capfd:** Bridge the per-item captured output into pytest's capture
+  infrastructure so `capsys.readouterr()` returns the correct content.
+  Currently the stream proxy operates independently of pytest's capture
+  mechanism — the two need to be wired together.
 
 - **caplog:** Install a per-thread `logging.Handler` that collects records into a
   thread-local list. During sequential reporting, replay records into caplog's
@@ -60,37 +66,52 @@ those are the only two fields mutated during fixture lifecycle — but it's frag
 **Priority:** Medium — current implementation works, but one pytest release could
 break it silently.
 
-## Interactive per-worker output viewer
+## TTY output viewer
 
-**Goal:** Let users see live stdout/stderr from individual worker threads
-during parallel execution, without output interleaving.
+**Goal:** A CLI-level TTY wrapper that gives real-time visibility into
+parallel test execution — overall progress, global-scope output, and
+switchable per-thread or per-test output frames.
 
-**Problem:** Currently, worker output is suppressed by `_ThreadLocalStream`
-during parallel execution. Users see nothing until the reporting phase.
-Passing `-s` shows interleaved output from all workers, which is unreadable.
+**Problem:** In TTY mode, worker `print()` output is buffered and only
+surfaces on failure or when the user passes `-vs` to disable capture.
+Users cannot see output from running tests in real time, and there is
+no way to inspect individual worker activity during execution.
 
-**Approach:** Two modes, selected automatically based on terminal capability:
+**Current state:** The per-worker buffer infrastructure is in place
+(`_ThreadLocalStream` captures per-item, `captured_output` stores it,
+`pytest_threadpool_report` hook allows plugins to consume it).
+Shared-scope fixture output (session/package/module/class) is properly
+scoped and emitted at the suite level. The live reporter already tracks
+per-file/per-item state with ANSI cursor movement.
 
-- **Interactive mode** (TTY detected): A status bar shows worker threads and
-  their current test. The user switches focus between workers (keyboard
-  shortcut or arrow keys) to stream one worker's buffered output live to the
-  main terminal area. Unfocused workers continue buffering silently, indicated
-  by status dots or spinners. Similar to `docker compose logs --follow` with
-  service selection.
+**Design:**
 
-- **Buffer mode** (pipe/CI, or explicit opt-out): Per-worker output is
-  collected and replayed sequentially during the reporting phase. This is the
-  fallback and the default for non-TTY environments.
+- **Top area — overall progress:** Compact status showing total
+  progress, pass/fail counts, and elapsed time. Always visible
+  regardless of which frame is selected.
 
-**Control:** `--threadpool-output=live|buffered` flag for explicit selection.
-Default: `live` when stdout is a TTY, `buffered` otherwise.
+- **Global frame (default):** Shows global-scope output in real time —
+  session/package/module/class fixture setup and teardown, collection
+  messages, and warnings. This is the default view when no specific
+  thread or test is focused.
 
-**Prerequisites:** Depends on the capture fixture support work — the
-per-worker buffer infrastructure for capsys/caplog is the same data source
-the interactive viewer would consume.
+- **Per-thread frames:** Switch focus to a specific worker thread to
+  stream its buffered output live. Unfocused workers continue buffering
+  silently, indicated by status dots or spinners in the progress area.
 
-**Priority:** Low — nice to have after capture fixtures and core stability
-work lands.
+- **Per-test frames:** Switch focus to a specific test to see its
+  setup, call, and teardown output. Completed tests show their full
+  captured output; running tests stream live.
+
+- **Frame switching:** Keyboard shortcuts or arrow keys to cycle between
+  global, per-thread, and per-test views. Similar to
+  `docker compose logs --follow` with service selection.
+
+**Control:** `--threadpool-output=live|buffered` flag for explicit
+selection. Default: `live` when stdout is a TTY, `buffered` otherwise.
+
+**Priority:** Medium — currently users need `-vs` to see output, which
+is a clear workaround but a friction point for adoption.
 
 ## Plugin compatibility testing
 
