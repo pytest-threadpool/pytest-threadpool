@@ -55,6 +55,7 @@ class ViewManager:
         self._layout = LayoutManager()
         self._scroll_column = ScrollColumn()
         self._entered = False
+        self._enter_lock = threading.Lock()
 
         # Backward-compat: a shared ScreenBuffer for the old API.
         self._compat_buffer = ScreenBuffer()
@@ -77,7 +78,9 @@ class ViewManager:
 
     def ensure_entered(self) -> None:
         """Enter alt screen on first call.  No-op after that."""
-        if not self._entered:
+        with self._enter_lock:
+            if self._entered:
+                return
             self._display.enter()
             self._display.enable_mouse()
             self._entered = True
@@ -154,7 +157,17 @@ class ViewManager:
 
         total = self._compat_buffer.nlines
         vp = self._viewport_height
+        _dbg = self._debug_log
+        if _dbg is not None:
+            _dbg.write(
+                f"  _process_input: {len(events)} events, "
+                f"nlines={total} vp={vp} scroll={self._user_scroll}\n"
+            )
+            _dbg.flush()
         if total <= vp:
+            if _dbg is not None:
+                _dbg.write("  _process_input: DISCARDED (content fits viewport)\n")
+                _dbg.flush()
             return False
 
         delta = 0
@@ -222,6 +235,13 @@ class ViewManager:
         self._display.ensure_cbreak()
         self._display.force_enable_mouse()
 
+        # Restart the InputReader if it died (e.g. killed by the
+        # device-level singleton when a duplicate was created during
+        # the race window before ensure_entered's lock took effect).
+        ir = self._input_reader
+        if ir is not None and not ir.alive:
+            self._start_input_reader()
+
         # Enable debug logging if requested.
         dbg_path = os.environ.get("THREADPOOL_SCROLL_DEBUG")
         if dbg_path:
@@ -245,10 +265,38 @@ class ViewManager:
             term_prog = os.environ.get("TERM_PROGRAM", "")
             term = os.environ.get("TERM", "")
 
+            ir_alive = ir.alive if ir else "N/A"
+            ir_exit = getattr(ir, "_exit_reason", "N/A") if ir else "N/A"
+            ir_loops = ir.loop_count if ir else -1
+            ir_orig_fd = getattr(ir, "_orig_fd", "N/A") if ir else "N/A"
+            ir_dup_fd = ir._fd if ir else "N/A"
+            ir_is_tty = getattr(ir, "_fd_is_tty", "N/A") if ir else "N/A"
+            ir_dup_is_tty_now = "N/A"
+            if ir:
+                try:
+                    ir_dup_is_tty_now = os.isatty(ir._fd)
+                except OSError:
+                    ir_dup_is_tty_now = "ERROR"
+            # Dump all thread stacks to find competing tty readers.
+            import traceback as _tb
+
+            frames = sys._current_frames()
+            thread_map = {t.ident: t.name for t in threading.enumerate()}
+            thread_stacks = []
+            for tid, frame in frames.items():
+                name = thread_map.get(tid, f"unknown-{tid}")
+                stack = "".join(_tb.format_stack(frame))
+                thread_stacks.append(f"  --- thread {name} (id={tid}) ---\n{stack}")
+
             self._debug_log.write(
                 f"wait_and_leave entered\n"
                 f"  input_reader={ir}\n"
-                f"  input_reader_fd={ir_fd}\n"
+                f"  input_reader_fd={ir_fd} (orig={ir_orig_fd} dup={ir_dup_fd})\n"
+                f"  input_reader_dup_is_tty_at_create={ir_is_tty}\n"
+                f"  input_reader_dup_is_tty_now={ir_dup_is_tty_now}\n"
+                f"  input_reader_alive={ir_alive}\n"
+                f"  input_reader_exit_reason={ir_exit}\n"
+                f"  input_reader_loop_count={ir_loops}\n"
                 f"  refresh_thread={self._refresh_thread}\n"
                 f"  refresh_alive={getattr(self._refresh_thread, 'is_alive', lambda: 'N/A')()}\n"
                 f"  height={self._height} nlines={self._compat_buffer.nlines}\n"
@@ -258,6 +306,7 @@ class ViewManager:
                 f"  TERM={term} TERM_PROGRAM={term_prog} TMUX={tmux}\n"
                 f"  sys.stdin={sys.stdin} fileno={getattr(sys.stdin, 'fileno', lambda: 'N/A')}\n"
                 f"  tty fds:\n" + "\n".join(fd_info) + "\n"
+                "  thread stacks:\n" + "\n".join(thread_stacks) + "\n"
             )
             self._debug_log.flush()
             if ir is not None:

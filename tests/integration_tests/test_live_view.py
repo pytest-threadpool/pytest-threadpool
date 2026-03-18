@@ -1,12 +1,22 @@
 """Integration tests for the live-view interface wrapper (--threadpool-output)."""
 
+import fcntl
 import os
 import pty
 import select
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import time
+
+
+def _set_pty_size(fd: int, rows: int, cols: int) -> None:
+    """Set the terminal size on a pty fd via ioctl."""
+    winsize = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+
 
 SIMPLE_TESTS = """\
 import pytest
@@ -43,10 +53,12 @@ def _run_live_pty(ftdir, *, wait_for="Ctrl+C", send_sigint=True):
         "live",
     ]
     master_fd, slave_fd = pty.openpty()
+    _set_pty_size(slave_fd, rows=24, cols=120)
     env = os.environ.copy()
     env.pop("TEAMCITY_VERSION", None)
     env["TERM"] = "xterm-256color"
     env["COLUMNS"] = "120"
+    env["LINES"] = "24"
     proc = subprocess.Popen(
         args,
         stdin=slave_fd,
@@ -209,8 +221,9 @@ class TestScrollable:
 {methods}
 """.format(methods="\n".join(f"    def test_{i:03d}(self): pass" for i in range(60)))
 
-# SGR mouse scroll-up event (button 64, col 1, row 1, press).
+# SGR mouse scroll events (col 1, row 1, press).
 _SCROLL_UP_SGR = b"\033[<64;1;1M"
+_SCROLL_DOWN_SGR = b"\033[<65;1;1M"
 _ARROW_UP = b"\033[A"
 
 
@@ -255,11 +268,12 @@ class TestLiveViewScrollResponsiveness:
             "live",
         ]
         master_fd, slave_fd = pty.openpty()
+        _set_pty_size(slave_fd, rows=6, cols=120)
         env = os.environ.copy()
         env.pop("TEAMCITY_VERSION", None)
         env["TERM"] = "xterm-256color"
         env["COLUMNS"] = "120"
-        env["LINES"] = "24"
+        env["LINES"] = "6"
         proc = subprocess.Popen(
             args,
             stdin=slave_fd,
@@ -294,12 +308,14 @@ class TestLiveViewScrollResponsiveness:
             # Drain any remaining output from the rendering.
             _read_pty(master_fd, timeout=0.3)
 
-            # Send scroll events and measure time until display output.
+            # Send alternating scroll-up/down events so we never hit a
+            # boundary where further scrolling produces no display change.
             latencies = []
             debug_info = []
             for _i in range(10):
                 t0 = time.monotonic()
-                os.write(master_fd, _SCROLL_UP_SGR)
+                event = _SCROLL_UP_SGR if _i % 2 == 0 else _SCROLL_DOWN_SGR
+                os.write(master_fd, event)
                 # Poll rapidly for display output.
                 got_response = False
                 response_bytes = 0
@@ -358,11 +374,12 @@ class TestLiveViewScrollResponsiveness:
             "live",
         ]
         master_fd, slave_fd = pty.openpty()
+        _set_pty_size(slave_fd, rows=6, cols=120)
         env = os.environ.copy()
         env.pop("TEAMCITY_VERSION", None)
         env["TERM"] = "xterm-256color"
         env["COLUMNS"] = "120"
-        env["LINES"] = "24"
+        env["LINES"] = "6"
         proc = subprocess.Popen(
             args,
             stdin=slave_fd,
@@ -395,9 +412,11 @@ class TestLiveViewScrollResponsiveness:
 
             latencies = []
             debug_info = []
+            _ARROW_DOWN = b"\033[B"
             for _i in range(10):
                 t0 = time.monotonic()
-                os.write(master_fd, _ARROW_UP)
+                arrow = _ARROW_UP if _i % 2 == 0 else _ARROW_DOWN
+                os.write(master_fd, arrow)
                 got_response = False
                 response_bytes = 0
                 deadline_inner = t0 + 1.0

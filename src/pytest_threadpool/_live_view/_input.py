@@ -10,7 +10,7 @@ import re
 import select
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from typing import IO
@@ -121,10 +121,30 @@ class InputReader:
 
     Uses ``select()`` with a short timeout so the thread can be
     stopped promptly without blocking in ``os.read()``.
+
+    Only one active reader per process is allowed — starting a new
+    reader automatically stops any previously active one to prevent
+    competing reads on the shared terminal input buffer.
     """
 
+    # Registry of active readers keyed by terminal device number.
+    # When a new reader starts on the same device, old ones are stopped
+    # to prevent competing reads on the shared kernel input buffer.
+    _active_lock = threading.Lock()
+    _active_by_dev: ClassVar[dict[int, InputReader]] = {}
+
     def __init__(self, fd: int, *, notify: threading.Event | None = None) -> None:
-        self._fd = fd
+        # Dup the fd so that external dup2() redirections (e.g. pytest
+        # capture redirecting fd 1 to a pipe) don't affect our reads.
+        # The duped fd shares the same underlying terminal device.
+        self._orig_fd = fd
+        self._fd = os.dup(fd)
+        self._fd_is_tty = os.isatty(self._fd)
+        self._dev: int = 0
+        if self._fd_is_tty:
+            with contextlib.suppress(OSError):
+                self._dev = os.fstat(self._fd).st_rdev
+        self._owns_fd = True
         self._queue: queue.Queue[InputEvent] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -139,7 +159,21 @@ class InputReader:
         self.loop_count: int = 0
 
     def start(self) -> None:
-        """Start the background reader thread."""
+        """Start the background reader thread.
+
+        For tty fds, signals any previously active InputReader on the
+        same device to stop (without blocking) to prevent competing
+        reads on the shared kernel input buffer.  Pipe/pty fds used
+        in unit tests are unaffected.
+        """
+        if self._dev:
+            with InputReader._active_lock:
+                prev = InputReader._active_by_dev.get(self._dev)
+                if prev is not None and prev is not self:
+                    prev._stop.set()
+                    with contextlib.suppress(OSError):
+                        os.write(prev._wake_w, b"\x00")
+                InputReader._active_by_dev[self._dev] = self
         self._stop.clear()
         self._ready.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -148,6 +182,10 @@ class InputReader:
 
     def stop(self) -> None:
         """Signal the reader to stop and wait for the thread."""
+        if self._dev:
+            with InputReader._active_lock:
+                if InputReader._active_by_dev.get(self._dev) is self:
+                    del InputReader._active_by_dev[self._dev]
         self._stop.set()
         # Wake up select() via the self-pipe.
         with contextlib.suppress(OSError):
@@ -155,10 +193,14 @@ class InputReader:
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
-        # Close the self-pipe fds.
+        # Close the self-pipe fds and our duped input fd.
         for fd in (self._wake_r, self._wake_w):
             with contextlib.suppress(OSError):
                 os.close(fd)
+        if self._owns_fd:
+            with contextlib.suppress(OSError):
+                os.close(self._fd)
+            self._owns_fd = False
 
     def poll(self) -> InputEvent | None:
         """Return the next event, or None if the queue is empty."""
@@ -178,67 +220,43 @@ class InputReader:
         return events
 
     def _run(self) -> None:
-        fd = self._fd
-        os.set_blocking(fd, False)
         self._ready.set()
-        try:
-            self._read_loop(fd)
-        finally:
-            with contextlib.suppress(OSError):
-                os.set_blocking(fd, True)
+        self._read_loop(self._fd)
+
+    @property
+    def alive(self) -> bool:
+        """Whether the reader thread is still running."""
+        t = self._thread
+        return t is not None and t.is_alive()
 
     def _read_loop(self, fd: int) -> None:
-        """Non-blocking reads with adaptive wait strategy.
+        """Blocking select() + blocking read() with self-pipe shutdown.
 
-        Uses ``select()`` to wait for data efficiently.  If select()
-        exhibits starvation (common on free-threaded Python 3.14t),
-        automatically falls back to a tight polling loop with short
-        sleeps.
+        Never changes the fd's blocking mode — the fd may be shared
+        (e.g. stdout) so setting ``O_NONBLOCK`` would break other
+        writers.  ``select()`` tells us data is available, then the
+        blocking ``read()`` returns immediately.
         """
         wake_r = self._wake_r
-        # Start with select() — switch to polling if starvation detected.
-        use_select = True
-        starvation_count = 0
-
         while not self._stop.is_set():
-            if use_select:
-                t_sel = time.monotonic()
-                try:
-                    ready, _, _ = select.select([fd, wake_r], [], [], 0.01)
-                except (OSError, ValueError):
-                    break
-                elapsed = time.monotonic() - t_sel
-                # Detect starvation: select(timeout=10ms) took >100ms.
-                if not ready and elapsed > 0.1:
-                    starvation_count += 1
-                    if starvation_count >= 3:
-                        use_select = False
-                        _dbg = self.debug_log
-                        if _dbg is not None:
-                            _dbg.write(
-                                f"  IR select starvation detected "
-                                f"({elapsed:.3f}s), switching to poll\n"
-                            )
-                            _dbg.flush()
-                else:
-                    starvation_count = 0
-                self.loop_count += 1
-                if not ready:
-                    continue
-                if wake_r in ready:
-                    break
-            else:
-                # Tight polling fallback — 0.5 ms sleep.
-                time.sleep(0.0005)
-                self.loop_count += 1
-
+            try:
+                ready, _, _ = select.select([fd, wake_r], [], [], 0.01)
+            except (OSError, ValueError) as exc:
+                self._exit_reason = f"select error: {exc}"
+                break
+            self.loop_count += 1
+            if not ready:
+                continue
+            if wake_r in ready:
+                self._exit_reason = "wake pipe"
+                break
             try:
                 data = os.read(fd, 4096)
-            except BlockingIOError:
-                continue
-            except OSError:
+            except OSError as exc:
+                self._exit_reason = f"read error: {exc}"
                 break
             if not data:
+                self._exit_reason = "EOF"
                 break
             t_read = time.monotonic()
             events = parse_events(data)
@@ -254,3 +272,5 @@ class InputReader:
                     f"raw={data!r}\n"
                 )
                 _dbg.flush()
+        if not hasattr(self, "_exit_reason"):
+            self._exit_reason = "stop flag"

@@ -95,7 +95,13 @@ class Display:
             mode = termios.tcgetattr(self._tty_fd)
             was_cooked = bool(mode[3] & termios.ICANON)
             if was_cooked:
-                tty.setcbreak(self._tty_fd)
+                # Clear ICANON and ECHO directly rather than calling
+                # tty.setcbreak() which uses TCSAFLUSH and discards
+                # any pending input.
+                mode[3] = mode[3] & ~(termios.ICANON | termios.ECHO)
+                mode[6][termios.VMIN] = 1
+                mode[6][termios.VTIME] = 0
+                termios.tcsetattr(self._tty_fd, termios.TCSANOW, mode)
             return was_cooked
         except termios.error:
             return False
@@ -232,35 +238,30 @@ class Display:
     def _get_tty_fd(self) -> int:
         """Get a file descriptor for the controlling terminal.
 
-        Only opens ``/dev/tty`` as a last resort when the Display's
-        own file is a real tty.  Opening ``/dev/tty`` when the file
-        is a StringIO (unit tests) would create competing fds that
-        share the kernel input buffer with the real ViewManager's fd.
+        Returns an existing fd — never opens new fds.  Opening extra
+        fds to the same tty creates competing readers that share the
+        kernel input buffer, causing event theft.  Uses only portable
+        APIs (no ``/dev/tty``).
         """
-        # Try Python's sys.stdin first (handles reassignment by plugins).
+        # Try the Display's own output file first.
+        try:
+            fd = self._file.fileno()
+            if os.isatty(fd):
+                return fd
+        except (OSError, ValueError, AttributeError):
+            pass
+        # Try Python's sys.stdin (handles reassignment by plugins).
         try:
             fd = sys.stdin.fileno()
             if os.isatty(fd):
                 return fd
         except (OSError, ValueError):
             pass
-        # Try raw fd 0 — sys.stdin may have been replaced by pytest's
-        # capture plugin, but fd 0 itself may still be the tty.
-        try:
-            if os.isatty(0):
-                return 0
-        except OSError:
-            pass
-        # Only open /dev/tty if our output file is actually a terminal.
-        # Test code using StringIO must not open /dev/tty — those fds
-        # would share the kernel input buffer with the real tty reader.
-        try:
-            file_fd = self._file.fileno()
-            if not os.isatty(file_fd):
-                return -1
-        except (OSError, ValueError, AttributeError):
-            return -1
-        try:
-            return os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-        except OSError:
-            return -1
+        # Try stdout / stderr raw fds as last resort.
+        for candidate in (1, 2):
+            try:
+                if os.isatty(candidate):
+                    return candidate
+            except OSError:
+                pass
+        return -1
