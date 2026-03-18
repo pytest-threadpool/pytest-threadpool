@@ -226,11 +226,12 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
     thread-local log handler captures records per-worker and attaches
     them to "Captured log call" report sections on failure, matching
     sequential pytest behavior. Log output does not appear in stdout
-    for passing tests unless `--log-cli-level` is set. `--log-level`
-    controls which records are captured. Existing `StreamHandler`
-    instances (on `sys.stdout` or `sys.stderr`) are automatically
-    redirected through the per-thread proxy so their output is grouped
-    per-test instead of interleaving globally.
+    for passing tests unless `--log-cli-level` is set or a
+    `StreamHandler` explicitly targets `sys.stdout` or `sys.stderr`.
+    `--log-level` controls which records are captured. Existing
+    `StreamHandler` instances are automatically redirected through
+    the per-thread proxy so their output is grouped per-test instead
+    of interleaving globally.
   - **IDE and CI runners (PyCharm, TeamCity, VS Code)** — Each test's
     function-scoped setup, call, and teardown output appears in its own
     report. Shared fixture output (session/package/module/class setup
