@@ -105,7 +105,8 @@ objects — both within a parallel group and across sequential groups:
 
 ```python
 import threading
-import pytest
+
+from pytest_threadpool import parallelizable
 
 
 class SharedState:
@@ -114,7 +115,7 @@ class SharedState:
   results = {}
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
   def test_a1(self):
     with SharedState.lock:
@@ -125,7 +126,7 @@ class TestGroupA:
       SharedState.results["a2"] = True
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
   def test_b1(self):
     SharedState.event.set()
