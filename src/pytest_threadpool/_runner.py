@@ -10,6 +10,7 @@ import threading
 from collections import OrderedDict
 from datetime import UTC, datetime
 
+from _pytest.logging import LogCaptureHandler, caplog_handler_key, caplog_records_key
 from _pytest.runner import CallInfo, call_and_report, show_test_item
 
 from pytest_threadpool._fixtures import FixtureManager
@@ -87,9 +88,10 @@ class _ThreadLocalLogHandler(logging.Handler):
         if formatter is not None:
             self.setFormatter(formatter)
 
-    def activate(self) -> None:
+    def activate(self, caplog_handler: logging.Handler | None = None) -> None:
         self._local.records = []
         self._local.output = io.StringIO()
+        self._local.caplog_handler = caplog_handler
 
     def deactivate(self) -> tuple[list[logging.LogRecord], str]:
         """Stop capturing and return (records, formatted_text)."""
@@ -97,12 +99,25 @@ class _ThreadLocalLogHandler(logging.Handler):
         output = getattr(self._local, "output", None)
         self._local.records = None
         self._local.output = None
+        self._local.caplog_handler = None
         return records, output.getvalue() if output else ""
+
+    def set_caplog_handler(self, handler: logging.Handler | None) -> None:
+        """Set or clear the caplog handler for the current worker thread."""
+        self._local.caplog_handler = handler
 
     def emit(self, record: logging.LogRecord) -> None:
         records = getattr(self._local, "records", None)
         if records is None:
             return  # pragma: no cover -- non-worker thread, let other handlers deal with it
+
+        # Forward to caplog handler first.  Use handle() (not emit())
+        # so the handler's own level filter — set by caplog.at_level()
+        # or caplog.set_level() — is respected.
+        caplog_h = getattr(self._local, "caplog_handler", None)
+        if caplog_h is not None:
+            caplog_h.handle(record)
+
         records.append(record)
         output = getattr(self._local, "output", None)
         if output is not None:
@@ -811,11 +826,32 @@ class ParallelRunner:
             if setup_info.excinfo is None:
                 fixture_fins = FixtureManager.save_and_clear_function_fixtures(test_item)
                 call_info = None
+
+                # Bridge caplog fixture to the thread-local log handler.
+                # Instead of adding a handler to the root logger (which
+                # would race on logger.setLevel via caplog.at_level),
+                # install a fresh LogCaptureHandler and register it with
+                # our _ThreadLocalLogHandler.  The thread-local handler
+                # forwards records to caplog's handler, which applies its
+                # own level filter set by at_level() / set_level().
+                caplog_handler = None
+                if "caplog" in test_item.fixturenames:
+                    caplog_handler = LogCaptureHandler()
+                    test_item.stash[caplog_handler_key] = caplog_handler
+                    if caplog_records_key not in test_item.stash:
+                        test_item.stash[caplog_records_key] = {}
+                    test_item.stash[caplog_records_key]["call"] = caplog_handler.records
+                    if log_handler is not None:
+                        log_handler.set_caplog_handler(caplog_handler)
+
                 if not cancelled.is_set():
                     live.mark_running(test_item)
                     call_info = CallInfo.from_call(lambda: test_item.runtest(), when="call")
                     if not cancelled.is_set():
                         live.mark_call_done(test_item, call_info.excinfo)
+
+                if caplog_handler is not None and log_handler is not None:
+                    log_handler.set_caplog_handler(None)
 
                 # Run function-scoped fixture teardown in the worker.
                 # Includes yield cleanup, addfinalizer callbacks, and
@@ -960,7 +996,9 @@ class ParallelRunner:
                 for h in list(lg.handlers):
                     if (
                         isinstance(h, logging.StreamHandler)
-                        and not isinstance(h, (logging.FileHandler, _ThreadLocalLogHandler))
+                        and not isinstance(
+                            h, (logging.FileHandler, _ThreadLocalLogHandler, LogCaptureHandler)
+                        )
                         and hasattr(h, "stream")
                     ):
                         original = h.stream
@@ -978,6 +1016,7 @@ class ParallelRunner:
         # captured per-item instead of going to the root logger's handlers
         # (which are not thread-safe for per-test reporting).
         log_handler: _ThreadLocalLogHandler | None = None
+        saved_root_level: int = logging.WARNING
         captured_log: dict = {}
         if workers > 1 and len(parallel_items) > 1:
             log_level_raw = session.config.getoption("log_level", None)
@@ -994,9 +1033,35 @@ class ParallelRunner:
             log_handler = _ThreadLocalLogHandler(level=handler_level, formatter=formatter)
             root_logger = logging.getLogger()
             root_logger.addHandler(log_handler)
-            # Ensure root logger level allows records through to our handler.
-            if log_level is not None and root_logger.level > log_level:
-                root_logger.setLevel(log_level)
+            # Set root logger to NOTSET so all records reach our handler
+            # regardless of caplog.at_level() / set_level() calls in
+            # parallel tests (which race on root logger level).  Our
+            # handler applies --log-level filtering via its own level,
+            # and caplog handlers apply their own level filters.
+            #
+            # Patch root logger's setLevel to store levels in thread-local
+            # storage so caplog.at_level() in one thread doesn't clobber
+            # the root level for all other threads.  getEffectiveLevel is
+            # also patched so child loggers walking up the hierarchy see
+            # the per-thread level (or NOTSET if no thread-local override).
+            saved_root_level = root_logger.level
+            root_logger.setLevel(logging.NOTSET)
+            _root_tl_levels = threading.local()
+            _original_root_setLevel = type(root_logger).setLevel
+
+            def _tl_root_setLevel(self: logging.Logger, level: int | str) -> None:
+                _root_tl_levels.level = logging._checkLevel(level)  # type: ignore[attr-defined]
+
+            _original_root_getEffectiveLevel = type(root_logger).getEffectiveLevel
+
+            def _tl_root_getEffectiveLevel(self: logging.Logger) -> int:
+                tl = getattr(_root_tl_levels, "level", None)
+                if tl is not None:
+                    return tl  # type: ignore[return-value]
+                return logging.NOTSET
+
+            type(root_logger).setLevel = _tl_root_setLevel  # type: ignore[assignment]
+            type(root_logger).getEffectiveLevel = _tl_root_getEffectiveLevel  # type: ignore[assignment]
 
         tc_active = _is_teamcity(session.config)
 
@@ -1192,6 +1257,10 @@ class ParallelRunner:
             h.stream = original_stream
         if log_handler is not None:
             logging.getLogger().removeHandler(log_handler)
+            # Restore patched Logger methods before restoring level
+            type(logging.getLogger()).setLevel = _original_root_setLevel  # type: ignore[possibly-undefined]
+            type(logging.getLogger()).getEffectiveLevel = _original_root_getEffectiveLevel  # type: ignore[possibly-undefined]
+            logging.getLogger().setLevel(saved_root_level)
 
         # Pop parallel items from setupstate stack
         # noinspection PyProtectedMember

@@ -10,12 +10,24 @@ interleaves and pytest raises "cannot use capsys and capsys at the same time".
 `caplog` leaks records across tests, and `at_level()` context managers race on the
 shared root logger.
 
-**Current state:** Worker stdout/stderr is already captured per-item by
-`_ThreadLocalStream` and associated with the test item via `captured_output`.
-The `deactivate()` method returns buffered content, which is attached to
-`report.sections` and (in passive/`-s` mode) emitted to real stdout after
-the result line. A `pytest_threadpool_report` hook allows plugins to
-customize output handling.
+**Current state:**
+
+- **stdout/stderr capture:** Worker stdout/stderr is captured per-item by
+  `_ThreadLocalStream` and associated with the test item via `captured_output`.
+  The `deactivate()` method returns buffered content, which is attached to
+  `report.sections` and (in passive/`-s` mode) emitted to real stdout after
+  the result line. A `pytest_threadpool_report` hook allows plugins to
+  customize output handling.
+
+- **Logging (done):** Standard `logging.Logger` calls work natively in
+  parallel tests. A `_ThreadLocalLogHandler` on the root logger captures
+  records per-worker into thread-local lists. On completion, records are
+  attached to "Captured log call" report sections on failure, matching
+  sequential pytest behavior. `--log-level` controls which records are
+  captured. Existing `StreamHandler` instances (targeting `sys.stdout` or
+  `sys.stderr`) are automatically patched during parallel execution so
+  their output flows through the per-thread proxy and is grouped per-test
+  instead of leaking to global output.
 
 **Remaining work:**
 
@@ -24,13 +36,18 @@ customize output handling.
   Currently the stream proxy operates independently of pytest's capture
   mechanism — the two need to be wired together.
 
-- **caplog:** Install a per-thread `logging.Handler` that collects records into a
-  thread-local list. During sequential reporting, replay records into caplog's
-  handler so the fixture sees the correct records for each test.
+- **caplog fixture (done):** The `caplog` fixture works natively in parallel
+  tests. A fresh `LogCaptureHandler` is installed per-worker and bridged
+  to the thread-local log handler via record forwarding. `caplog.records`,
+  `caplog.text`, `caplog.record_tuples`, `caplog.messages`, `caplog.clear()`,
+  `caplog.at_level()`, and `caplog.set_level()` all work as expected.
+  Cross-test record isolation is guaranteed — each worker's caplog sees
+  only its own records. The root logger's `setLevel` is patched to use
+  thread-local storage during parallel execution, preventing `at_level()`
+  races across threads.
 
 **Edge cases to handle:**
 - Nested captures (fixtures that call `capsys.readouterr()` mid-test)
-- `caplog.at_level()` context managers across threads
 - Fixtures that mix capsys with print output
 - `capfd` (file descriptor level) vs `capsys` (sys.stdout level)
 

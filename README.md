@@ -203,11 +203,9 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
 - **No plugin compatibility guarantees** — Interactions with other pytest
   plugins (e.g. `pytest-xdist`, `pytest-timeout`, `pytest-randomly`) are
   untested and may conflict.
-- **No `capsys`/`capfd`/`caplog` in parallel** — These fixtures are not
-  thread-safe. `capsys`/`capfd` fail with "cannot use capsys and capsys at
-  the same time" when requested by parallel tests. `caplog` leaks records
-  across fixtures and its `at_level()` context managers race on the shared
-  root logger. Alternatives:
+- **No `capsys`/`capfd` in parallel** — These fixtures are not thread-safe.
+  `capsys`/`capfd` fail with "cannot use capsys and capsys at the same time"
+  when requested by parallel tests. Alternatives:
   - **`print()`** — Worker output is buffered by thread-local stream
     proxies and reported alongside each test's result. In default capture
     mode, output appears in "Captured stdout call" sections on failure.
@@ -216,6 +214,23 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
     suppresses print output; use `-vs` to see it. A TTY-friendly output
     viewer with switchable per-thread/per-test frames is planned (see
     [ROADMAP](ROADMAP.md)).
+  - **`caplog`** — The `caplog` fixture works natively in parallel tests.
+    `caplog.records`, `caplog.text`, `caplog.record_tuples`,
+    `caplog.messages`, `caplog.clear()`, `caplog.at_level()`, and
+    `caplog.set_level()` all behave the same as in sequential pytest.
+    Each worker gets its own `LogCaptureHandler` with per-thread record
+    isolation — parallel tests don't leak records into each other's
+    caplog. Failed tests show "Captured log call" sections as expected.
+  - **`logging.Logger`** — Standard `logging` calls (`logger.info()`,
+    `logger.warning()`, etc.) work natively in parallel tests. A
+    thread-local log handler captures records per-worker and attaches
+    them to "Captured log call" report sections on failure, matching
+    sequential pytest behavior. Log output does not appear in stdout
+    for passing tests unless `--log-cli-level` is set. `--log-level`
+    controls which records are captured. Existing `StreamHandler`
+    instances (on `sys.stdout` or `sys.stderr`) are automatically
+    redirected through the per-thread proxy so their output is grouped
+    per-test instead of interleaving globally.
   - **IDE and CI runners (PyCharm, TeamCity, VS Code)** — Each test's
     function-scoped setup, call, and teardown output appears in its own
     report. Shared fixture output (session/package/module/class setup
@@ -224,9 +239,6 @@ worth browsing for real-world grouping, fixture, and reporting scenarios.
     runners group them correctly. Works via the `teamcity-messages`
     plugin (`--teamcity` flag); PyCharm and TeamCity CI use the same
     protocol.
-  - **Logging** — Use a per-test `FileHandler` writing to `tmp_path`, or
-    collect structured records in a shared thread-safe collection keyed by
-    test name (see [`examples/test_logging/`](examples/test_logging/)).
   - **Custom output hook** — Implement `pytest_threadpool_report` in a
     conftest or plugin to customize how captured worker output is handled.
     Return `True` to suppress the default output handling.
