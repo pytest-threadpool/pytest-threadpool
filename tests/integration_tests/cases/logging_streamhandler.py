@@ -7,6 +7,8 @@ import pytest
 
 from pytest_threadpool import parallelizable
 
+pytestmark = parallelizable("children")
+
 logger = logging.getLogger("myapp.tests")
 
 # Module-level StreamHandler: tests that handler.stream is patched
@@ -17,7 +19,6 @@ logger.addHandler(_module_handler)
 logger.setLevel(logging.DEBUG)
 
 
-@parallelizable("children")
 class TestModuleLevelStderrHandler:
     """Module-level StreamHandler(stderr) — output grouped per-test."""
 
@@ -31,7 +32,6 @@ class TestModuleLevelStderrHandler:
         pytest.fail("intentional failure")
 
 
-@parallelizable("children")
 class TestFixtureStdoutHandler:
     """Fixture-scoped StreamHandler(stdout) — output grouped per-test."""
 
@@ -49,7 +49,6 @@ class TestFixtureStdoutHandler:
         logger.warning("FIXSTDOUT_WARN_%d", n)
 
 
-@parallelizable("children")
 class TestNoStreamHandler:
     """No StreamHandler — only _ThreadLocalLogHandler captures records."""
 

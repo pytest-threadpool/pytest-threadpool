@@ -4,8 +4,9 @@ import pytest
 
 from pytest_threadpool import parallelizable
 
+pytestmark = parallelizable("children")
 
-@parallelizable("children")
+
 class TestFirstGroup:
     def test_fail_a(self):
         pytest.fail("intentional failure a")
@@ -17,7 +18,6 @@ class TestFirstGroup:
         pytest.fail("intentional failure c")
 
 
-@parallelizable("children")
 class TestSecondGroup:
     def test_d(self):
         pass

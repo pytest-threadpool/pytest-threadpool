@@ -6,10 +6,11 @@ import pytest
 
 from pytest_threadpool import parallelizable
 
+pytestmark = parallelizable("children")
+
 logger = logging.getLogger(__name__)
 
 
-@parallelizable("children")
 class TestCaplogRecords:
     """caplog.text and caplog.records work in parallel tests."""
 
@@ -38,7 +39,6 @@ class TestCaplogRecords:
         assert caplog.messages == ["MSG_ONLY"]
 
 
-@parallelizable("children")
 class TestCaplogIsolation:
     """Each parallel test gets its own caplog — no cross-test leaks."""
 
@@ -58,7 +58,6 @@ class TestCaplogIsolation:
         assert caplog.messages == ["ISO_C"]
 
 
-@parallelizable("children")
 class TestCaplogMethods:
     """caplog methods work correctly in parallel tests."""
 
@@ -82,7 +81,6 @@ class TestCaplogMethods:
         assert len(caplog.records) == 1
 
 
-@parallelizable("children")
 class TestCaplogWithFailure:
     """Failed tests show caplog content in report sections."""
 
