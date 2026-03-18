@@ -156,6 +156,20 @@ pytest --threadpool 8
 pytest
 ```
 
+To enable `--threadpool` by default, add it to your config:
+
+**pyproject.toml** (pytest 9.0+):
+```toml
+[tool.pytest]
+addopts = ["--threadpool", "auto"]
+```
+
+**pytest.ini**:
+```ini
+[pytest]
+addopts = --threadpool auto
+```
+
 ## Tested versions
 
 | Component | Versions                              |
