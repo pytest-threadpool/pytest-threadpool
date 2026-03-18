@@ -2,8 +2,10 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestParamFixture:
     @pytest.fixture(params=["alpha", "beta"], scope="class", autouse=True)
     def variant(self, request):

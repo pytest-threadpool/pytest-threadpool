@@ -3,10 +3,10 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMethodTeardown:
     setup_log: ClassVar[list] = []
     teardown_log: ClassVar[list] = []

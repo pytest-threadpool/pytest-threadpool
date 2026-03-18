@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     setup_log: ClassVar[list] = []
@@ -22,7 +24,7 @@ def resource(request):
         TestState.teardown_log.append(name)
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFuncYieldTeardown:
     barrier = threading.Barrier(3, timeout=10)
 

@@ -3,7 +3,7 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
 
 class TestState:
@@ -13,7 +13,7 @@ class TestState:
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMixedXunit:
     barrier = threading.Barrier(2, timeout=10)
 
@@ -33,7 +33,7 @@ class TestMixedXunit:
     def test_parallel_b(self):
         self.barrier.wait()
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_sequential_c(self):
         pass
 

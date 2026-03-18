@@ -5,8 +5,10 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestOnce:
     setup_count: ClassVar[list] = []
     barrier = threading.Barrier(3, timeout=10)

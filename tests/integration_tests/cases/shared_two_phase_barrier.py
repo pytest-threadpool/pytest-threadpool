@@ -3,10 +3,10 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestBarrier:
     barrier = threading.Barrier(3, timeout=10)
     verify_barrier = threading.Barrier(3, timeout=10)

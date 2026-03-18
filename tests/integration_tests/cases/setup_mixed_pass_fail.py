@@ -2,6 +2,8 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 @pytest.fixture
 def maybe_broken(request):
@@ -10,7 +12,7 @@ def maybe_broken(request):
     return "ok"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMixedSetup:
     def test_good_a(self, maybe_broken):
         assert maybe_broken == "ok"

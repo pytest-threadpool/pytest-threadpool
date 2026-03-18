@@ -3,9 +3,9 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
-pytestmark = pytest.mark.parallelizable("children")
+pytestmark = parallelizable("children")
 
 
 class TestState:
@@ -39,7 +39,7 @@ def test_gamma():
     barrier.wait()
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_verify():
     for name in ("test_alpha", "test_beta", "test_gamma"):
         assert name in TestState.setup_threads, f"missing setup for {name}"

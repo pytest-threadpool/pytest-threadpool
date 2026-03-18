@@ -3,7 +3,7 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
 
 class TestState:
@@ -13,7 +13,7 @@ class TestState:
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
-pytestmark = pytest.mark.parallelizable("children")
+pytestmark = parallelizable("children")
 
 
 def setup_function(function):
@@ -39,12 +39,12 @@ def test_parallel_b():
     barrier.wait()
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_sequential_c():
     pass
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_verify():
     # test_verify itself also triggers setup_function/teardown_function
     expected = {"test_parallel_a", "test_parallel_b", "test_sequential_c"}

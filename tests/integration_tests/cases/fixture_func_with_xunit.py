@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     log: ClassVar[list] = []
@@ -21,7 +23,7 @@ def fx_resource(request):
         TestState.log.append(f"fixture_teardown_{name}")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFixtureWithXunit:
     barrier = threading.Barrier(3, timeout=10)
 

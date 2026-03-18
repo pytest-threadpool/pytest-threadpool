@@ -4,8 +4,10 @@ import time
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestWithPrint:
     @pytest.mark.parametrize("n", [1, 2, 3, 4, 5])
     def test_param(self, n):

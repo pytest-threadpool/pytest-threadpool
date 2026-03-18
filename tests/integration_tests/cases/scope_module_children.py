@@ -2,9 +2,9 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import parallelizable
 
-pytestmark = pytest.mark.parallelizable("children")
+pytestmark = parallelizable("children")
 
 
 class _State:

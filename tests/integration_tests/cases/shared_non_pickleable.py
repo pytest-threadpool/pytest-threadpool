@@ -4,10 +4,10 @@ import logging
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestNonPickleable:
     lock = threading.Lock()
     condition = threading.Condition()

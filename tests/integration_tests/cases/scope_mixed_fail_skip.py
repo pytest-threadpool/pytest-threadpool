@@ -5,13 +5,15 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import not_parallelizable, parallelizable
+
 
 class TestState:
     parallel_log: ClassVar[list] = []
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMixedFailSkip:
     barrier = threading.Barrier(2, timeout=10)
 
@@ -25,11 +27,11 @@ class TestMixedFailSkip:
         with TestState.lock:
             TestState.parallel_log.append("b")
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_seq_fail(self):
         pytest.fail("intentional failure")
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_seq_skip(self):
         pytest.skip("intentional skip")
 

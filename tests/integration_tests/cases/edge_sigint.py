@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 teardown_ran = False
 _READY = Path(__file__).parent / ".sigint_ready"
 
@@ -16,7 +18,7 @@ def tracked_resource():
     teardown_ran = True
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSlowParallel:
     def test_slow_a(self, tracked_resource):
         _READY.write_text("ready")

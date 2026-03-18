@@ -4,12 +4,14 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     log: ClassVar[list] = []
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSingleAfterSkip:
     @pytest.mark.skipif("True", reason="always skip")
     def test_skipped(self):

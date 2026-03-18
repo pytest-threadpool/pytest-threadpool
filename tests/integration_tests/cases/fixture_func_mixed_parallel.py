@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import not_parallelizable, parallelizable
+
 
 class TestState:
     log: ClassVar[list] = []
@@ -21,7 +23,7 @@ def fx_resource(request):
         TestState.log.append(f"fixture_teardown_{name}")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMixedFixtures:
     barrier = threading.Barrier(2, timeout=10)
 
@@ -33,7 +35,7 @@ class TestMixedFixtures:
         assert fx_resource == "fx_test_parallel_b"
         self.barrier.wait()
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_sequential_c(self, fx_resource):
         assert fx_resource == "fx_test_sequential_c"
 

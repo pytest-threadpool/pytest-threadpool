@@ -4,6 +4,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     results: ClassVar[list] = []
@@ -16,7 +18,7 @@ def exploding_teardown(request):
         raise RuntimeError("teardown explodes")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestTeardownFails:
     def test_a(self, exploding_teardown):
         TestState.results.append("a")

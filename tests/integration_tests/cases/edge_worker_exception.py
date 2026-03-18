@@ -8,10 +8,10 @@ This uses a conftest hook to inject a RuntimeError during makereport,
 simulating an unexpected worker-level exception.
 """
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestWorkerException:
     def test_normal(self):
         pass

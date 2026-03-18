@@ -8,8 +8,10 @@ import time
 
 import pytest
 
+from pytest_threadpool import not_parallelizable, parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestGroupA:
     @pytest.mark.parametrize("n", range(3))
     def test_a(self, n):
@@ -17,12 +19,12 @@ class TestGroupA:
         time.sleep(0.02)
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_sequential():
     print("SEQ_OUTPUT")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     @pytest.mark.parametrize("n", range(3))
     def test_b(self, n):

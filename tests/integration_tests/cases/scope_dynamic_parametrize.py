@@ -2,9 +2,9 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import parallelizable
 
-pytestmark = pytest.mark.parallelizable("parameters")
+pytestmark = parallelizable("parameters")
 
 barrier = threading.Barrier(3, timeout=10)
 

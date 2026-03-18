@@ -6,6 +6,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     setup_starts: ClassVar[list] = []
@@ -22,7 +24,7 @@ def slow_resource(request):
     return request.node.name
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFixtureSetupParallel:
     barrier = threading.Barrier(3, timeout=10)
 

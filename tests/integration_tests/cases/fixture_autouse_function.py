@@ -4,6 +4,8 @@ import threading
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 setup_log = []
 teardown_log = []
 log_lock = threading.Lock()
@@ -18,7 +20,7 @@ def auto_resource(request):
         teardown_log.append(request.node.name)
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestAutouseFunction:
     barrier = threading.Barrier(3, timeout=10)
 

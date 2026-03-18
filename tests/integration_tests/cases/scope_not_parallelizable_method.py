@@ -3,10 +3,10 @@
 import time
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMixed:
     log: ClassVar[list] = []
 
@@ -14,7 +14,7 @@ class TestMixed:
         time.sleep(0.05)
         self.log.append("a")
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_seq_b(self):
         self.log.append("b")
 

@@ -2,6 +2,8 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 cleanup_log = []
 
 
@@ -20,7 +22,7 @@ def resource_b():
     cleanup_log.append("teardown_b")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestTeardownException:
     def test_uses_both(self, resource_a, resource_b):
         assert resource_a == "a"

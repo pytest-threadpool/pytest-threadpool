@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     teardown_order: ClassVar[list] = []
@@ -27,7 +29,7 @@ def derived_resource(base_resource, request):
         TestState.teardown_order.append(f"derived_teardown_{name}")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFuncChain:
     barrier = threading.Barrier(3, timeout=10)
 

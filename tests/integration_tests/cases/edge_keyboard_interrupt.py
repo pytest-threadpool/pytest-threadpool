@@ -1,9 +1,9 @@
 """Test body raises KeyboardInterrupt during parallel execution."""
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestKeyboardInterrupt:
     def test_normal(self):
         assert True

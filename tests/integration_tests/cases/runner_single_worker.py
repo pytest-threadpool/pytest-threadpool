@@ -2,14 +2,14 @@
 
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
 class TestState:
     log: ClassVar[list] = []
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSingleWorker:
     def test_a(self):
         TestState.log.append("a")

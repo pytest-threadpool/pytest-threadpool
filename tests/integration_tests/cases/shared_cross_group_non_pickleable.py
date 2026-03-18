@@ -3,7 +3,7 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
 class SharedState:
@@ -12,7 +12,7 @@ class SharedState:
     results: ClassVar[dict] = {}
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     barrier = threading.Barrier(2, timeout=10)
 
@@ -27,7 +27,7 @@ class TestGroupA:
             SharedState.results["a2"] = True
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     barrier = threading.Barrier(2, timeout=10)
 

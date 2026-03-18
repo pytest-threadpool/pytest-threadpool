@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     call_threads: ClassVar[dict] = {}
@@ -20,7 +22,7 @@ def tracked_resource(request):
         TestState.teardown_threads[name] = threading.current_thread().name
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestTeardownSameThread:
     barrier = threading.Barrier(3, timeout=10)
 

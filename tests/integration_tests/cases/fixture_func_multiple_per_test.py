@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     setup_counts: ClassVar[dict] = {"alpha": 0, "beta": 0, "gamma": 0}
@@ -35,7 +37,7 @@ def gamma():
     return f"gamma_{idx}"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestMultipleFixtures:
     barrier = threading.Barrier(3, timeout=10)
 

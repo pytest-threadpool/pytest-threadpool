@@ -4,8 +4,10 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestCleanup:
     flag: ClassVar[dict] = {"cleaned": False}
 

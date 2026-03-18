@@ -2,25 +2,25 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
 execution_threads = []
 lock = threading.Lock()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestAllNotParallelizable:
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_a(self):
         with lock:
             execution_threads.append(threading.current_thread().name)
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_b(self):
         with lock:
             execution_threads.append(threading.current_thread().name)
 
-    @pytest.mark.not_parallelizable
+    @not_parallelizable
     def test_c(self):
         with lock:
             execution_threads.append(threading.current_thread().name)

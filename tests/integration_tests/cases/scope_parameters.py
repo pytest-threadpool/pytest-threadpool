@@ -4,8 +4,10 @@ import threading
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("parameters")
+
+@parallelizable("parameters")
 class TestParam:
     _barrier = threading.Barrier(3, timeout=10)
 

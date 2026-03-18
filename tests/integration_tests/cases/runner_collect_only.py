@@ -2,10 +2,10 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestCollectOnly:
     barrier = threading.Barrier(2, timeout=10)
 

@@ -3,7 +3,7 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
 class TestState:
@@ -12,7 +12,7 @@ class TestState:
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestParallel:
     barrier = threading.Barrier(2, timeout=10)
 

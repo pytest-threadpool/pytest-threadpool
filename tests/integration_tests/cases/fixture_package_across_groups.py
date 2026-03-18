@@ -7,6 +7,8 @@ build a temporary package directory.
 CONFTEST_SRC = """\
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class Resource:
     pass

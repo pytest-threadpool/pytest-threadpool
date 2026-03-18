@@ -2,13 +2,15 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 @pytest.fixture
 def fx_resource(tmp_path):
     return tmp_path / "resource"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSetupOnly:
     def test_a(self, fx_resource):
         pass

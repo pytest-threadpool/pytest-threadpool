@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     setup_log: ClassVar[list] = []
@@ -26,7 +28,7 @@ def managed_resource(request):
     return f"resource_{name}"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestAddfinalizer:
     barrier = threading.Barrier(3, timeout=10)
 

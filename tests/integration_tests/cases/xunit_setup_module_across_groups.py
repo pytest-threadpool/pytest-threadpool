@@ -3,7 +3,7 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
 lock = threading.Lock()
 
@@ -23,7 +23,7 @@ def teardown_module(module):
         State.teardown_count += 1
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     def test_a1(self):
         assert State.setup_count == 1
@@ -32,13 +32,13 @@ class TestGroupA:
         assert State.setup_count == 1
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_sequential_between():
     assert State.setup_count == 1
     assert State.teardown_count == 0
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     def test_b1(self):
         assert State.setup_count == 1

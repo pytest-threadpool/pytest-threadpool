@@ -2,17 +2,17 @@
 
 import time
 
-import pytest
+from pytest_threadpool import not_parallelizable, parallelizable
 
-pytestmark = pytest.mark.parallelizable("children")
+pytestmark = parallelizable("children")
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_seq_a():
     time.sleep(0.05)
     print("ORDER:a")
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_seq_b():
     print("ORDER:b")

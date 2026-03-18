@@ -2,14 +2,14 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import parallelizable
 
 lock = threading.Lock()
 all_setups: list = []
 all_teardowns: list = []
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     barrier = threading.Barrier(2, timeout=10)
 
@@ -28,7 +28,7 @@ class TestGroupA:
         self.barrier.wait()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     barrier = threading.Barrier(2, timeout=10)
 

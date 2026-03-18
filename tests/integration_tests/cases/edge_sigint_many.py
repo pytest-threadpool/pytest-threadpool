@@ -3,12 +3,12 @@
 import time
 from pathlib import Path
 
-import pytest
+from pytest_threadpool import parallelizable
 
 _READY = Path(__file__).parent / ".sigint_ready"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestManySlowParallel:
     def test_slow_00(self):
         _READY.write_text("ready")

@@ -1,9 +1,9 @@
 """Test body raises SystemExit during parallel execution."""
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSystemExit:
     def test_normal(self):
         assert True

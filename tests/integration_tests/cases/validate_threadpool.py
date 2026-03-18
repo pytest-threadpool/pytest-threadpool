@@ -1,9 +1,9 @@
 """Simple test file used to trigger --threadpool on a faked GIL build."""
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSimple:
     def test_a(self):
         pass

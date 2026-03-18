@@ -2,7 +2,7 @@
 
 import threading
 
-import pytest
+from pytest_threadpool import parallelizable
 
 results = {}
 lock = threading.Lock()
@@ -14,7 +14,7 @@ def background_work(name, value):
         results[name] = computed
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestNestedThreads:
     def test_spawns_thread_a(self):
         t = threading.Thread(target=background_work, args=("a", 10))

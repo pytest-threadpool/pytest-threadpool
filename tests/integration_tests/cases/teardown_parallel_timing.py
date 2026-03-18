@@ -6,6 +6,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     teardown_end_times: ClassVar[list] = []
@@ -22,7 +24,7 @@ def slow_teardown_resource():
         TestState.teardown_end_times.append(time.monotonic())
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestParallelTeardown:
     barrier = threading.Barrier(3, timeout=10)
 

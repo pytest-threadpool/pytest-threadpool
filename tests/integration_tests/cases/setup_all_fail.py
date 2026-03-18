@@ -2,13 +2,15 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 @pytest.fixture
 def broken():
     raise RuntimeError("setup explodes")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestAllSetupFail:
     def test_a(self, broken):
         pass

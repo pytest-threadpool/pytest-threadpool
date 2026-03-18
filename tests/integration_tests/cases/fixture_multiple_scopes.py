@@ -2,6 +2,8 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 @pytest.fixture(scope="session")
 def session_res():
@@ -13,7 +15,7 @@ def module_res():
     return {"from": "module"}
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestCompose:
     def test_session(self, session_res):
         assert session_res["from"] == "session"

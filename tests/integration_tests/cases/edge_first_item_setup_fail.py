@@ -4,6 +4,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     results: ClassVar[list] = []
@@ -16,7 +18,7 @@ def first_breaks(request):
     return "ok"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFirstSetupFails:
     def test_a(self, first_breaks):
         pass

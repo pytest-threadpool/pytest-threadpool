@@ -2,6 +2,8 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 teardown_order = []
 
 
@@ -19,7 +21,7 @@ def db_transaction(db_connection):
     teardown_order.append("tx_teardown")
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestInterdependentFinalizers:
     def test_a(self, db_transaction):
         assert db_transaction == "tx(conn)"

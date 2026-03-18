@@ -6,8 +6,10 @@ inside a parallelizable class.
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestStandardMarks:
     @pytest.mark.skip(reason="intentional skip")
     def test_skipped(self):

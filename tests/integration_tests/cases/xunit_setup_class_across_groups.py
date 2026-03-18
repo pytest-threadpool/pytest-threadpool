@@ -3,12 +3,12 @@
 import threading
 from typing import ClassVar
 
-import pytest
+from pytest_threadpool import parallelizable
 
 lock = threading.Lock()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     setup_ids: ClassVar[list] = []
 
@@ -29,7 +29,7 @@ class TestGroupA:
         assert len([x for x in self.setup_ids if x != "teardown_a"]) == 1
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     setup_ids: ClassVar[list] = []
 

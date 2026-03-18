@@ -4,6 +4,8 @@ import threading
 
 import pytest
 
+from pytest_threadpool import not_parallelizable, parallelizable
+
 _ids = []
 lock = threading.Lock()
 
@@ -17,7 +19,7 @@ def module_resource():
     return Resource()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     def test_a1(self, module_resource):
         with lock:
@@ -28,13 +30,13 @@ class TestGroupA:
             _ids.append(id(module_resource))
 
 
-@pytest.mark.not_parallelizable
+@not_parallelizable
 def test_sequential_between(module_resource):
     with lock:
         _ids.append(id(module_resource))
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     def test_b1(self, module_resource):
         with lock:

@@ -2,13 +2,15 @@
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 @pytest.fixture
 def resource():
     return "value"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSetupShow:
     def test_a(self, resource):
         assert resource == "value"

@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     log: ClassVar[list] = []
@@ -35,7 +37,7 @@ def composite(request, session_id, module_id, class_id):
     return value
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestFuncWithSharedDeps:
     barrier = threading.Barrier(3, timeout=10)
 

@@ -5,6 +5,8 @@ from typing import ClassVar
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 
 class TestState:
     values: ClassVar[dict] = {}
@@ -23,7 +25,7 @@ def empty_parens_fixture(request):
     return f"ep_{request.node.name}"
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestImplicitFunctionScope:
     barrier = threading.Barrier(3, timeout=10)
 

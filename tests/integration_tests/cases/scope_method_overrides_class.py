@@ -4,8 +4,10 @@ import threading
 
 import pytest
 
+from pytest_threadpool import parallelizable
 
-@pytest.mark.parallelizable("children")
+
+@parallelizable("children")
 class TestOverride:
     child_barrier = threading.Barrier(2, timeout=10)
 
@@ -15,7 +17,7 @@ class TestOverride:
     def test_child_b(self):
         self.child_barrier.wait()
 
-    @pytest.mark.parallelizable("parameters")
+    @parallelizable("parameters")
     @pytest.mark.parametrize("v", [1, 2, 3])
     def test_own_param(self, v):
         pass

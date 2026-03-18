@@ -1,9 +1,9 @@
 """Single-method class — falls back to sequential without error."""
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestSolo:
     def test_only(self):
         assert True

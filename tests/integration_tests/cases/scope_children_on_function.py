@@ -3,10 +3,10 @@
 BUG-2: Should emit a warning and run sequentially, not silently ignore.
 """
 
-import pytest
+from pytest_threadpool import parallelizable
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 def test_lone_function():
     pass
 

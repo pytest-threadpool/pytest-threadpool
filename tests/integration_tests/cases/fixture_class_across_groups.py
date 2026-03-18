@@ -4,6 +4,8 @@ import threading
 
 import pytest
 
+from pytest_threadpool import parallelizable
+
 _ids_a = []
 _ids_b = []
 lock = threading.Lock()
@@ -18,7 +20,7 @@ def class_resource():
     return Resource()
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupA:
     def test_a1(self, class_resource):
         with lock:
@@ -29,7 +31,7 @@ class TestGroupA:
             _ids_a.append(id(class_resource))
 
 
-@pytest.mark.parallelizable("children")
+@parallelizable("children")
 class TestGroupB:
     def test_b1(self, class_resource):
         with lock:
