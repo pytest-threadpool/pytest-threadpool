@@ -155,9 +155,12 @@ class _LiveReporter:
     In passive mode (``-s`` without a live TTY), delegates entirely to
     pytest's standard terminal reporter so IDE runners receive the
     output they rely on for result detection.
+
+    When a ``ViewManager`` is provided, all terminal writes route through
+    its ``"main"`` channel instead of directly to the file handle.
     """
 
-    def __init__(self, session, items):
+    def __init__(self, session, items, view_manager=None):
         tr = session.config.pluginmanager.get_plugin("terminalreporter")
         self._tr = tr
         # noinspection PyProtectedMember
@@ -168,6 +171,7 @@ class _LiveReporter:
         self._reported = 0
         self._startpath = session.config.rootpath
         self._lock = threading.Lock()
+        self._view_manager = view_manager
 
         # Build file→items mapping in collection order
         self._file_order = []
@@ -209,7 +213,14 @@ class _LiveReporter:
         # No public accessor on TerminalWriter for the underlying file handle.
         # We need it for direct ANSI escape writes (cursor movement, colors)
         # that bypass TerminalWriter formatting.
-        self._file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
+        raw_file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
+
+        # When a ViewManager is active, route writes through the "main"
+        # channel so the ViewManager controls rendering.
+        if view_manager is not None and "main" in view_manager.channels:
+            self._file = view_manager.channels["main"]
+        else:
+            self._file = raw_file
 
         # When True, the next dumb-mode file line prefixes with \n
         # to separate from preceding sequential output.
@@ -451,9 +462,10 @@ class ParallelRunner:
     either sequentially (key is None or single item) or in parallel.
     """
 
-    def __init__(self, session, nthreads: int):
+    def __init__(self, session, nthreads: int, view_manager=None):
         self._session = session
         self._nthreads = nthreads
+        self._view_manager = view_manager
 
     def run_all(self) -> bool:
         """Main entry: group items and run each group."""
@@ -778,7 +790,7 @@ class ParallelRunner:
         workers = min(self._nthreads, len(parallel_items) or 1)
         call_results = {}
         reported = set()
-        live = _LiveReporter(session, items)
+        live = _LiveReporter(session, items, view_manager=self._view_manager)
         if after_sequential:
             live._needs_leading_newline = True
         live.pre_print()

@@ -26,6 +26,12 @@ def pytest_addoption(parser):
         metavar="N",
         help=("Parallelize marked test calls using N threads. 'auto' uses os.cpu_count()."),
     )
+    parser.addoption(
+        "--threadpool-output",
+        choices=["classic", "live"],
+        default="classic",
+        help="Output mode: 'classic' (current) or 'live' (interactive viewer)",
+    )
 
 
 def pytest_configure(config):
@@ -64,7 +70,24 @@ def pytest_runtestloop(session):
             "The GIL limits parallel speedup for CPU-bound tests.",
             stacklevel=1,
         )
-    runner = ParallelRunner(session, nthreads)
+
+    output_mode = session.config.getoption("threadpool_output", "classic")
+    view_manager = None
+    if output_mode == "live":
+        from pytest_threadpool._live_view import ViewManager
+
+        tr = session.config.pluginmanager.get_plugin("terminalreporter")
+        tw = tr._tw if tr and hasattr(tr, "_tw") else None  # pyright: ignore[reportPrivateUsage]
+        file = getattr(tw, "_file", None) if tw else None  # pyright: ignore[reportPrivateUsage]
+        is_tty = file is not None and hasattr(file, "isatty") and file.isatty()
+        if is_tty and file is not None:
+            width = getattr(tw, "fullwidth", 80) if tw else 80
+            view_manager = ViewManager(file, width)
+            view_manager.register("main")
+            view_manager.activate("main")
+            session.config._threadpool_view_manager = view_manager  # pyright: ignore[reportPrivateUsage]
+
+    runner = ParallelRunner(session, nthreads, view_manager=view_manager)
     return runner.run_all()
 
 
@@ -78,6 +101,12 @@ def _thread_count(config) -> int | None:
         return int(val)
     except ValueError:
         raise pytest.UsageError(f"--threadpool: expected integer or 'auto', got {val!r}") from None
+
+
+def pytest_unconfigure(config):
+    view_manager = getattr(config, "_threadpool_view_manager", None)
+    if view_manager is not None:
+        view_manager.wait_for_interrupt()
 
 
 def _is_free_threaded() -> bool:
