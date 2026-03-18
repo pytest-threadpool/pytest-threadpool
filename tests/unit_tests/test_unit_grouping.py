@@ -2,6 +2,8 @@
 
 import types
 
+import pytest
+
 from pytest_threadpool._constants import (
     MARKER_NOT_PARALLELIZABLE,
     MARKER_PARALLELIZABLE,
@@ -79,38 +81,25 @@ class TestGroupKeyChildrenOnFunction:
     """@parallelizable('children') on a standalone function warns and returns None."""
 
     def test_children_on_function_returns_none(self):
-        import warnings
-
         item = _make_item(
             own_markers=[FakeMark(MARKER_PARALLELIZABLE, ("children",))],
             name="test_lonely",
         )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.warns(UserWarning, match="test_lonely"):
             key = GroupKeyBuilder.group_key(item)
         assert key is None
-        # Filter to only our warning (catch_warnings is not thread-safe;
-        # parallel groups running concurrently may inject extra warnings).
-        ours = [x for x in w if "test_lonely" in str(x.message)]
-        assert len(ours) == 1
-        assert "children" in str(ours[0].message)
 
     def test_children_on_class_method_warns(self):
         """Even on a class method, own 'children' marker warns (children is for containers)."""
-        import warnings
-
         cls = type("C", (), {})
         item = _make_item(
             own_markers=[FakeMark(MARKER_PARALLELIZABLE, ("children",))],
             cls=cls,
             name="test_in_class",
         )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with pytest.warns(UserWarning, match="test_in_class"):
             key = GroupKeyBuilder.group_key(item)
         assert key is None
-        ours = [x for x in w if "test_in_class" in str(x.message)]
-        assert len(ours) == 1
 
 
 class TestGroupKeyClassChildren:
