@@ -98,6 +98,9 @@ class FreethreadedTestDir:
         to the project root so all parallel data files land in one directory.
         """
         env = os.environ.copy()
+        # Prevent teamcity-messages from auto-activating in child processes
+        # unless the test explicitly passes --teamcity.
+        env.pop("TEAMCITY_VERSION", None)
         if os.getenv("COVERAGE_PROCESS_START"):
             # Resolve to absolute path so subprocess finds config from its cwd
             env["COVERAGE_PROCESS_START"] = str(

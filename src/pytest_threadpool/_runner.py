@@ -14,6 +14,11 @@ from pytest_threadpool._fixtures import FixtureManager
 from pytest_threadpool._grouping import GroupKeyBuilder
 
 
+def _is_teamcity(config) -> bool:
+    """Detect TeamCity mode via CLI flag or TEAMCITY_VERSION env var."""
+    return bool(config.getoption("teamcity", 0)) or bool(os.environ.get("TEAMCITY_VERSION"))
+
+
 def _tc_escape(text: str) -> str:
     """Escape text for TeamCity service message values."""
     return (
@@ -138,7 +143,7 @@ class _LiveReporter:
         # test results.
         capture = session.config.getoption("capture", "fd")
         self._passive = not self._live and capture == "no"
-        self._tc = bool(session.config.getoption("teamcity", 0))
+        self._tc = _is_teamcity(session.config)
 
         self._width = getattr(self._tw, "fullwidth", 80) if self._tw else 80
         # noinspection PyProtectedMember
@@ -883,7 +888,7 @@ class ParallelRunner:
             sys.stdout = stdout_proxy  # type: ignore[assignment]
             sys.stderr = stderr_proxy  # type: ignore[assignment]
 
-        tc_active = bool(session.config.getoption("teamcity", 0))
+        tc_active = _is_teamcity(session.config)
 
         def _emit_tc_message(text: str) -> None:
             """Emit a TeamCity message event to the real stdout."""
