@@ -1050,6 +1050,7 @@ class ParallelRunner:
                         stderr_proxy.activate()  # type: ignore[union-attr]
                     if log_handler is not None:
                         log_handler.activate()
+                    call_info = None
                     try:
                         item, setup_info, call_info, td_info = _do_setup_call_teardown(work_item)
                         if setup_info is not None:
@@ -1060,7 +1061,6 @@ class ParallelRunner:
                             setup_passed[item] = setup_info.excinfo is None
                         if td_info is not None:
                             teardown_infos[item] = td_info
-                        result_queue.put((item, call_info))
                     except BaseException as exc:
                         call_info = CallInfo.from_call(
                             lambda e=exc: (_ for _ in ()).throw(e),
@@ -1077,8 +1077,9 @@ class ParallelRunner:
                                 item=work_item, call=setup_info
                             )
                             setup_passed[work_item] = False
-                        result_queue.put((work_item, call_info))
                     finally:
+                        # Capture output BEFORE queueing the result so the
+                        # main thread's _report_item always sees the data.
                         if stdout_proxy is not None:
                             out = stdout_proxy.deactivate()
                             err = stderr_proxy.deactivate()  # type: ignore[union-attr]
@@ -1088,6 +1089,7 @@ class ParallelRunner:
                             records, log_text = log_handler.deactivate()
                             if records:
                                 captured_log[work_item] = (records, log_text)
+                        result_queue.put((work_item, call_info))
 
             threads = []
             for _ in range(workers):
