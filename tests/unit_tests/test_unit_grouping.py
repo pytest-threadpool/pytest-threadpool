@@ -89,9 +89,11 @@ class TestGroupKeyChildrenOnFunction:
             warnings.simplefilter("always")
             key = GroupKeyBuilder.group_key(item)
         assert key is None
-        assert len(w) == 1
-        assert "test_lonely" in str(w[0].message)
-        assert "children" in str(w[0].message)
+        # Filter to only our warning (catch_warnings is not thread-safe;
+        # parallel groups running concurrently may inject extra warnings).
+        ours = [x for x in w if "test_lonely" in str(x.message)]
+        assert len(ours) == 1
+        assert "children" in str(ours[0].message)
 
     def test_children_on_class_method_warns(self):
         """Even on a class method, own 'children' marker warns (children is for containers)."""
@@ -107,7 +109,8 @@ class TestGroupKeyChildrenOnFunction:
             warnings.simplefilter("always")
             key = GroupKeyBuilder.group_key(item)
         assert key is None
-        assert len(w) == 1
+        ours = [x for x in w if "test_in_class" in str(x.message)]
+        assert len(ours) == 1
 
 
 class TestGroupKeyClassChildren:
