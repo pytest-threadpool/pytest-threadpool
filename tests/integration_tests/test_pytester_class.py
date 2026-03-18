@@ -15,7 +15,11 @@ class TestClassParallel:
         ftdir.copy_case("class_thread_verification")
         result = ftdir.run_pytest("--threadpool", "3", "-s")
         result.assert_outcomes(passed=3)
-        threads = {line.split("THREAD:")[1] for line in result.outlines if "THREAD:" in line}
+        # Worker print() is captured and reported alongside the test
+        # result, so look in full stdout (includes captured sections).
+        threads = {
+            line.split("THREAD:")[1] for line in result.stdout.splitlines() if "THREAD:" in line
+        }
         assert len(threads) >= 2, f"expected multiple threads, got {threads}"
 
     def test_single_method_class(self, ftdir):

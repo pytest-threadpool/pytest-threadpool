@@ -56,16 +56,18 @@ class TestDefaultCapture:
 
 
 class TestCaptureNoFlag:
-    """With -s (--capture=no), stream proxy is disabled — output passes through."""
+    """With -s (--capture=no), worker output is captured and reported
+    alongside test results (in 'Captured stdout call' sections)."""
 
     def test_worker_print_visible_with_dash_s(self, ftdir):
-        """With -s, worker print() output appears in stdout."""
+        """With -s, worker print() output appears in stdout (captured section)."""
         ftdir.copy_case("capture_print_parallel")
         result = ftdir.run_pytest("--threadpool", "4", "-s")
         result.assert_outcomes(passed=4)
 
-        found = [line for line in result.outlines if "WORKER_OUTPUT" in line]
-        assert found, f"Worker print() should be visible with -s.\nstdout:\n{result.stdout}"
+        assert "WORKER_OUTPUT" in result.stdout, (
+            f"Worker print() should be visible with -s.\nstdout:\n{result.stdout}"
+        )
 
     def test_all_workers_visible_with_dash_s(self, ftdir):
         """With -s, output from all workers appears."""
@@ -84,8 +86,7 @@ class TestCaptureNoFlag:
         result = ftdir.run_pytest("--threadpool", "4", "--capture=no")
         result.assert_outcomes(passed=4)
 
-        found = [line for line in result.outlines if "WORKER_OUTPUT" in line]
-        assert found, (
+        assert "WORKER_OUTPUT" in result.stdout, (
             f"Worker print() should be visible with --capture=no.\nstdout:\n{result.stdout}"
         )
 
@@ -103,6 +104,52 @@ class TestCaptureNoFlag:
         )
         assert "SEQ_OUTPUT" in result.stdout, (
             f"Sequential output missing with -s.\nstdout:\n{result.stdout}"
+        )
+
+
+class TestPassiveMode:
+    """With -s in a non-TTY subprocess, the reporter is passive.
+
+    The terminal reporter's per-test output (PASSED/FAILED) is
+    suppressed during parallel reporting.  IDE test runners
+    (TeamCity / PyCharm) write directly to sys.stdout and are
+    unaffected by the suppression.
+    """
+
+    def test_captured_output_emitted_with_dash_s(self, ftdir):
+        """With -s, captured worker output appears in stdout."""
+        ftdir.copy_case("capture_print_parallel")
+        result = ftdir.run_pytest("--threadpool", "4", "-s")
+        result.assert_outcomes(passed=4)
+
+        assert "WORKER_OUTPUT" in result.stdout, (
+            f"Worker output should appear in stdout.\nstdout:\n{result.stdout}"
+        )
+
+    def test_no_custom_reporter_lines_with_dash_s(self, ftdir):
+        """With -s, the custom dumb-mode reporter does not write file lines."""
+        _INIT = 'import pytest\npytestmark = pytest.mark.parallelizable("children")\n'
+        _MOD_A = "def test_a1(): pass\ndef test_a2(): pass\n"
+        _MOD_B = "def test_b1(): pass\ndef test_b2(): pass\n"
+        pkg = ftdir.mkdir("spkg")
+        pkg.joinpath("__init__.py").write_text(_INIT)
+        pkg.joinpath("test_a.py").write_text(_MOD_A)
+        pkg.joinpath("test_b.py").write_text(_MOD_B)
+
+        result = ftdir.run_pytest("--threadpool", "4", "-s")
+        result.assert_outcomes(passed=4)
+
+        # Custom dumb-mode lines have format "path ..  [ xx%]" with progress.
+        # In passive mode, these should not appear — pytest's standard output
+        # handles everything.
+        custom_lines = [
+            line
+            for line in result.outlines
+            if re.search(r"test_[ab]\.py\s+\.+\s+\[\s*\d+%\]", line)
+        ]
+        assert not custom_lines, (
+            f"Custom reporter lines found in passive mode: {custom_lines}\n"
+            f"stdout:\n{result.stdout}"
         )
 
 
