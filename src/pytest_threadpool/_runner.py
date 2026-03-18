@@ -1,6 +1,8 @@
 """Parallel test runner orchestration."""
 
+import contextlib
 import io
+import logging
 import os
 import queue
 import sys
@@ -14,9 +16,10 @@ from pytest_threadpool._fixtures import FixtureManager
 from pytest_threadpool._grouping import GroupKeyBuilder
 
 
-def _is_teamcity(config) -> bool:
+def _is_teamcity(config, env: dict[str, str] | None = None) -> bool:
     """Detect TeamCity mode via CLI flag or TEAMCITY_VERSION env var."""
-    return bool(config.getoption("teamcity", 0)) or bool(os.environ.get("TEAMCITY_VERSION"))
+    _env = env if env is not None else os.environ
+    return bool(config.getoption("teamcity", 0)) or bool(_env.get("TEAMCITY_VERSION"))
 
 
 def _tc_escape(text: str) -> str:
@@ -67,6 +70,47 @@ class _ThreadLocalStream:
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._real, name)
+
+
+class _ThreadLocalLogHandler(logging.Handler):
+    """Thread-local logging handler for capturing log records per worker.
+
+    Installed once on the root logger before parallel workers start.
+    Worker threads call ``activate()`` to collect records into a
+    per-thread list, and ``deactivate()`` to retrieve them.  Records
+    emitted by non-worker threads pass through to other handlers.
+    """
+
+    def __init__(self, level: int = logging.NOTSET, formatter: logging.Formatter | None = None):
+        super().__init__(level)
+        self._local = threading.local()
+        if formatter is not None:
+            self.setFormatter(formatter)
+
+    def activate(self) -> None:
+        self._local.records = []
+        self._local.output = io.StringIO()
+
+    def deactivate(self) -> tuple[list[logging.LogRecord], str]:
+        """Stop capturing and return (records, formatted_text)."""
+        records = getattr(self._local, "records", None) or []
+        output = getattr(self._local, "output", None)
+        self._local.records = None
+        self._local.output = None
+        return records, output.getvalue() if output else ""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        records = getattr(self._local, "records", None)
+        if records is None:
+            return  # pragma: no cover -- non-worker thread, let other handlers deal with it
+        records.append(record)
+        output = getattr(self._local, "output", None)
+        if output is not None:
+            try:
+                msg = self.format(record)
+                output.write(msg + "\n")
+            except Exception:  # pragma: no cover
+                pass
 
 
 # Test slot states
@@ -816,6 +860,12 @@ class ParallelRunner:
                     if err:
                         call_rep.sections.append(("Captured stderr call", err))
 
+                # Attach captured log records to the report.
+                if call_rep is not None and item in captured_log:
+                    _, log_text = captured_log[item]
+                    if log_text:
+                        call_rep.sections.append(("Captured log call", log_text))
+
                 report = call_rep or setup_reports[item]
 
                 # Strip shared-scope captured sections from setup report.
@@ -882,11 +932,71 @@ class ParallelRunner:
         # the test result instead of leaking into global stdout.
         stdout_proxy: _ThreadLocalStream | None = None
         stderr_proxy: _ThreadLocalStream | None = None
+        patched_stream_handlers: list[tuple[logging.StreamHandler, object]] = []
         if workers > 1 and len(parallel_items) > 1:
             stdout_proxy = _ThreadLocalStream(sys.stdout)
             stderr_proxy = _ThreadLocalStream(sys.stderr)
+            real_stdout = sys.stdout
             sys.stdout = stdout_proxy  # type: ignore[assignment]
             sys.stderr = stderr_proxy  # type: ignore[assignment]
+
+            # Patch existing StreamHandlers so their writes go through
+            # our per-thread proxy instead of directly to the original
+            # stream.  Handler.stream may be the raw stderr, a pytest
+            # EncodedFile wrapper, or any other object — we can't reliably
+            # identify which stream it targets by name or identity because
+            # pytest's capture plugin swaps streams between collection and
+            # execution.
+            #
+            # We redirect ALL StreamHandler streams (except FileHandlers
+            # and our own _ThreadLocalLogHandler) through the proxy.
+            # stdout-targeting handlers go to stdout_proxy; everything
+            # else (stderr is the default) goes to stderr_proxy.
+            for lg in [logging.getLogger()] + [
+                logging.getLogger(name)
+                for name in list(logging.Logger.manager.loggerDict)
+                if isinstance(logging.Logger.manager.loggerDict.get(name), logging.Logger)
+            ]:
+                for h in list(lg.handlers):
+                    if (
+                        isinstance(h, logging.StreamHandler)
+                        and not isinstance(h, (logging.FileHandler, _ThreadLocalLogHandler))
+                        and hasattr(h, "stream")
+                    ):
+                        original = h.stream
+                        name = str(getattr(original, "name", ""))
+                        if original is real_stdout or "<stdout>" in name:
+                            patched_stream_handlers.append((h, original))
+                            h.stream = stdout_proxy  # type: ignore[assignment]
+                        else:
+                            # Default: redirect to stderr proxy (StreamHandler
+                            # defaults to stderr when no stream is specified).
+                            patched_stream_handlers.append((h, original))
+                            h.stream = stderr_proxy  # type: ignore[assignment]
+
+        # Install thread-local log handler so worker log records are
+        # captured per-item instead of going to the root logger's handlers
+        # (which are not thread-safe for per-test reporting).
+        log_handler: _ThreadLocalLogHandler | None = None
+        captured_log: dict = {}
+        if workers > 1 and len(parallel_items) > 1:
+            log_level_raw = session.config.getoption("log_level", None)
+            if not log_level_raw:
+                log_level_raw = session.config.getini("log_level")
+            log_level: int | None = None  # type: ignore[no-redef]
+            if log_level_raw:
+                with contextlib.suppress(ValueError, TypeError):
+                    log_level = int(getattr(logging, str(log_level_raw).upper(), log_level_raw))
+            log_fmt = session.config.getini("log_format")
+            log_date_fmt = session.config.getini("log_date_format")
+            formatter = logging.Formatter(log_fmt, log_date_fmt)
+            handler_level = log_level if log_level is not None else logging.WARNING
+            log_handler = _ThreadLocalLogHandler(level=handler_level, formatter=formatter)
+            root_logger = logging.getLogger()
+            root_logger.addHandler(log_handler)
+            # Ensure root logger level allows records through to our handler.
+            if log_level is not None and root_logger.level > log_level:
+                root_logger.setLevel(log_level)
 
         tc_active = _is_teamcity(session.config)
 
@@ -938,6 +1048,8 @@ class ParallelRunner:
                     if stdout_proxy is not None:
                         stdout_proxy.activate()
                         stderr_proxy.activate()  # type: ignore[union-attr]
+                    if log_handler is not None:
+                        log_handler.activate()
                     try:
                         item, setup_info, call_info, td_info = _do_setup_call_teardown(work_item)
                         if setup_info is not None:
@@ -972,6 +1084,10 @@ class ParallelRunner:
                             err = stderr_proxy.deactivate()  # type: ignore[union-attr]
                             if out or err:
                                 captured_output[work_item] = (out, err)
+                        if log_handler is not None:
+                            records, log_text = log_handler.deactivate()
+                            if records:
+                                captured_log[work_item] = (records, log_text)
 
             threads = []
             for _ in range(workers):
@@ -1065,10 +1181,15 @@ class ParallelRunner:
 
         live.finish()
 
-        # Restore real stdout/stderr after all workers are done
+        # Restore real stdout/stderr and remove log handler after all workers are done
         if stdout_proxy is not None:
             sys.stdout = stdout_proxy._real  # type: ignore[assignment]
             sys.stderr = stderr_proxy._real  # type: ignore[union-attr, assignment]
+        # Restore patched StreamHandlers to their original streams
+        for h, original_stream in patched_stream_handlers:
+            h.stream = original_stream
+        if log_handler is not None:
+            logging.getLogger().removeHandler(log_handler)
 
         # Pop parallel items from setupstate stack
         # noinspection PyProtectedMember
