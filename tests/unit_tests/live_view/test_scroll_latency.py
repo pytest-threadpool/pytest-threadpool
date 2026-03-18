@@ -142,7 +142,7 @@ def _setup_post_test_vm(
     vm._display._height = height
 
     # Mark as entered WITHOUT calling ensure_entered (which opens tty).
-    vm._entered = True
+    vm._entered.set()
     vm._display._in_alt = True
 
     # Populate buffer directly.
@@ -283,7 +283,7 @@ def _setup_pipe_vm(width: int = 200, height: int = 24) -> tuple[WriteTracker, Vi
     vm = ViewManager(f, width)
     vm._height = height
     vm._display._height = height
-    vm._entered = True
+    vm._entered.set()
     vm._display._in_alt = True
 
     for line in _SESSION_LINES:
@@ -393,7 +393,7 @@ def _setup_pty_vm(width: int = 120, height: int = 24) -> tuple[int, ViewManager,
     vm = ViewManager(slave_file, width)
     vm._height = height
     vm._display._height = height
-    vm._entered = True
+    vm._entered.set()
     vm._display._in_alt = True
     # Point the Display's tty fd at the slave so ensure_cbreak works.
     vm._display._tty_fd = slave_fd

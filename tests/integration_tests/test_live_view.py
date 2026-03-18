@@ -225,6 +225,7 @@ class TestScrollable:
 _SCROLL_UP_SGR = b"\033[<64;1;1M"
 _SCROLL_DOWN_SGR = b"\033[<65;1;1M"
 _ARROW_UP = b"\033[A"
+_ARROW_DOWN = b"\033[B"
 
 
 def _read_pty(master_fd, timeout=0.5):
@@ -412,7 +413,6 @@ class TestLiveViewScrollResponsiveness:
 
             latencies = []
             debug_info = []
-            _ARROW_DOWN = b"\033[B"
             for _i in range(10):
                 t0 = time.monotonic()
                 arrow = _ARROW_UP if _i % 2 == 0 else _ARROW_DOWN

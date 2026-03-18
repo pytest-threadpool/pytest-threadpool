@@ -9,11 +9,7 @@ import queue
 import re
 import select
 import threading
-import time
-from typing import TYPE_CHECKING, ClassVar
-
-if TYPE_CHECKING:
-    from typing import IO
+from typing import ClassVar
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,11 +133,9 @@ class InputReader:
         # Dup the fd so that external dup2() redirections (e.g. pytest
         # capture redirecting fd 1 to a pipe) don't affect our reads.
         # The duped fd shares the same underlying terminal device.
-        self._orig_fd = fd
         self._fd = os.dup(fd)
-        self._fd_is_tty = os.isatty(self._fd)
         self._dev: int = 0
-        if self._fd_is_tty:
+        if os.isatty(self._fd):
             with contextlib.suppress(OSError):
                 self._dev = os.fstat(self._fd).st_rdev
         self._owns_fd = True
@@ -149,14 +143,8 @@ class InputReader:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._ready = threading.Event()
-        # Self-pipe for clean shutdown of blocking select().
         self._wake_r, self._wake_w = os.pipe()
-        # Optional event to signal when new input arrives.
         self._notify = notify
-        # Debug log (set externally to enable).
-        self.debug_log: IO[str] | None = None
-        # Heartbeat: incremented every loop iteration.
-        self.loop_count: int = 0
 
     def start(self) -> None:
         """Start the background reader thread.
@@ -223,12 +211,6 @@ class InputReader:
         self._ready.set()
         self._read_loop(self._fd)
 
-    @property
-    def alive(self) -> bool:
-        """Whether the reader thread is still running."""
-        t = self._thread
-        return t is not None and t.is_alive()
-
     def _read_loop(self, fd: int) -> None:
         """Blocking select() + blocking read() with self-pipe shutdown.
 
@@ -241,36 +223,20 @@ class InputReader:
         while not self._stop.is_set():
             try:
                 ready, _, _ = select.select([fd, wake_r], [], [], 0.01)
-            except (OSError, ValueError) as exc:
-                self._exit_reason = f"select error: {exc}"
+            except (OSError, ValueError):
                 break
-            self.loop_count += 1
             if not ready:
                 continue
             if wake_r in ready:
-                self._exit_reason = "wake pipe"
                 break
             try:
                 data = os.read(fd, 4096)
-            except OSError as exc:
-                self._exit_reason = f"read error: {exc}"
+            except OSError:
                 break
             if not data:
-                self._exit_reason = "EOF"
                 break
-            t_read = time.monotonic()
             events = parse_events(data)
             for event in events:
                 self._queue.put(event)
             if self._notify is not None:
                 self._notify.set()
-            _dbg = self.debug_log
-            if _dbg is not None:
-                _dbg.write(
-                    f"  IR {t_read:.4f} fd={fd} "
-                    f"bytes={len(data)} events={len(events)} "
-                    f"raw={data!r}\n"
-                )
-                _dbg.flush()
-        if not hasattr(self, "_exit_reason"):
-            self._exit_reason = "stop flag"

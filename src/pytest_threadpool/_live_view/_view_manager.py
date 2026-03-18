@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import sys
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -54,36 +53,42 @@ class ViewManager:
         self._cursor = Cursor()
         self._layout = LayoutManager()
         self._scroll_column = ScrollColumn()
-        self._entered = False
+        self._entered = threading.Event()
         self._enter_lock = threading.Lock()
 
         # Backward-compat: a shared ScreenBuffer for the old API.
         self._compat_buffer = ScreenBuffer()
-        self._display_compat_attached = False
         # Number of header lines (skipped on dump since pytest prints them).
         self._header_lines = 0
         # User scroll offset (None = auto-scroll to bottom).
         self._user_scroll: int | None = None
-        # Input reader (created on enter if a tty fd is available).
         self._input_reader: InputReader | None = None
-        # Background refresh thread.
         self._refresh_thread: threading.Thread | None = None
         self._refresh_stop = threading.Event()
         # Set when the display needs a repaint (content or scroll changed).
         self._dirty = threading.Event()
-        # Debug log for scroll latency diagnosis (set to a file object to enable).
-        self._debug_log: IO[str] | None = None
 
     # --- Backward-compatible API (used by _runner.py) ---
 
     def ensure_entered(self) -> None:
-        """Enter alt screen on first call.  No-op after that."""
+        """Enter alt screen on first call.  No-op after that.
+
+        Thread-safe: the ``_enter_lock`` serialises first entry, and
+        ``_entered`` (a ``threading.Event``) is set inside the lock
+        before starting background threads.  The ``is_set()`` fast
+        path means subsequent calls avoid the lock entirely.
+        """
+        if self._entered.is_set():
+            return
         with self._enter_lock:
-            if self._entered:
+            if self._entered.is_set():
                 return
             self._display.enter()
             self._display.enable_mouse()
-            self._entered = True
+            # Set the flag *before* starting threads so that any
+            # concurrent caller exits immediately and never creates
+            # duplicate readers/refresh loops.
+            self._entered.set()
             self._start_input_reader()
             self._start_refresh_loop()
 
@@ -157,17 +162,7 @@ class ViewManager:
 
         total = self._compat_buffer.nlines
         vp = self._viewport_height
-        _dbg = self._debug_log
-        if _dbg is not None:
-            _dbg.write(
-                f"  _process_input: {len(events)} events, "
-                f"nlines={total} vp={vp} scroll={self._user_scroll}\n"
-            )
-            _dbg.flush()
         if total <= vp:
-            if _dbg is not None:
-                _dbg.write("  _process_input: DISCARDED (content fits viewport)\n")
-                _dbg.flush()
             return False
 
         delta = 0
@@ -223,7 +218,7 @@ class ViewManager:
         background refresh thread — no lock contention, no data race
         on ``_user_scroll``.
         """
-        if not self._entered:
+        if not self._entered.is_set():
             return
         if threading.current_thread() is not threading.main_thread():
             return  # pragma: no cover
@@ -235,82 +230,10 @@ class ViewManager:
         self._display.ensure_cbreak()
         self._display.force_enable_mouse()
 
-        # Restart the InputReader if it died (e.g. killed by the
-        # device-level singleton when a duplicate was created during
-        # the race window before ensure_entered's lock took effect).
-        ir = self._input_reader
-        if ir is not None and not ir.alive:
-            self._start_input_reader()
-
-        # Enable debug logging if requested.
-        dbg_path = os.environ.get("THREADPOOL_SCROLL_DEBUG")
-        if dbg_path:
-            self._debug_log = open(dbg_path, "w")  # noqa: SIM115
-            ir = self._input_reader
-            ir_fd = ir._fd if ir else "N/A"
-
-            # Gather fd diagnostics.
-            fd_info: list[str] = []
-            for probe_fd in range(20):
-                try:
-                    is_tty = os.isatty(probe_fd)
-                    if is_tty:
-                        st = os.fstat(probe_fd)
-                        maj, minor = os.major(st.st_rdev), os.minor(st.st_rdev)
-                        fd_info.append(f"    fd {probe_fd}: tty dev={maj}:{minor}")
-                except OSError:
-                    pass
-            # Check for terminal multiplexer.
-            tmux = os.environ.get("TMUX", "")
-            term_prog = os.environ.get("TERM_PROGRAM", "")
-            term = os.environ.get("TERM", "")
-
-            ir_alive = ir.alive if ir else "N/A"
-            ir_exit = getattr(ir, "_exit_reason", "N/A") if ir else "N/A"
-            ir_loops = ir.loop_count if ir else -1
-            ir_orig_fd = getattr(ir, "_orig_fd", "N/A") if ir else "N/A"
-            ir_dup_fd = ir._fd if ir else "N/A"
-            ir_is_tty = getattr(ir, "_fd_is_tty", "N/A") if ir else "N/A"
-            ir_dup_is_tty_now = "N/A"
-            if ir:
-                try:
-                    ir_dup_is_tty_now = os.isatty(ir._fd)
-                except OSError:
-                    ir_dup_is_tty_now = "ERROR"
-            # Dump all thread stacks to find competing tty readers.
-            import traceback as _tb
-
-            frames = sys._current_frames()
-            thread_map = {t.ident: t.name for t in threading.enumerate()}
-            thread_stacks = []
-            for tid, frame in frames.items():
-                name = thread_map.get(tid, f"unknown-{tid}")
-                stack = "".join(_tb.format_stack(frame))
-                thread_stacks.append(f"  --- thread {name} (id={tid}) ---\n{stack}")
-
-            self._debug_log.write(
-                f"wait_and_leave entered\n"
-                f"  input_reader={ir}\n"
-                f"  input_reader_fd={ir_fd} (orig={ir_orig_fd} dup={ir_dup_fd})\n"
-                f"  input_reader_dup_is_tty_at_create={ir_is_tty}\n"
-                f"  input_reader_dup_is_tty_now={ir_dup_is_tty_now}\n"
-                f"  input_reader_alive={ir_alive}\n"
-                f"  input_reader_exit_reason={ir_exit}\n"
-                f"  input_reader_loop_count={ir_loops}\n"
-                f"  refresh_thread={self._refresh_thread}\n"
-                f"  refresh_alive={getattr(self._refresh_thread, 'is_alive', lambda: 'N/A')()}\n"
-                f"  height={self._height} nlines={self._compat_buffer.nlines}\n"
-                f"  viewport_height={self._viewport_height}\n"
-                f"  file_type={type(self._file)}\n"
-                f"  display._tty_fd={self._display._tty_fd}\n"
-                f"  TERM={term} TERM_PROGRAM={term_prog} TMUX={tmux}\n"
-                f"  sys.stdin={sys.stdin} fileno={getattr(sys.stdin, 'fileno', lambda: 'N/A')}\n"
-                f"  tty fds:\n" + "\n".join(fd_info) + "\n"
-                "  thread stacks:\n" + "\n".join(thread_stacks) + "\n"
-            )
-            self._debug_log.flush()
-            if ir is not None:
-                ir.debug_log = self._debug_log
+        # Ensure the input reader is alive — it may have been stopped
+        # by the device-level singleton if a duplicate was briefly
+        # created before the enter lock took effect.
+        self._start_input_reader()
 
         self._status_line.set_text("tests complete \u2014 press Ctrl+C to exit")
         self._dirty.set()
@@ -329,9 +252,6 @@ class ViewManager:
 
         self._stop_refresh_loop()
         self._stop_input_reader()
-        if self._debug_log is not None:
-            self._debug_log.close()
-            self._debug_log = None
         self._display.leave()
         # Skip header lines — pytest's terminal reporter prints them.
         all_lines = self._compat_buffer.snapshot()
@@ -360,28 +280,16 @@ class ViewManager:
         cbreak_interval = 0.5  # re-assert cbreak every 500 ms
         last_cbreak = 0.0
         while not self._refresh_stop.is_set():
-            # Wait for dirty flag or timeout — whichever comes first.
             self._dirty.wait(timeout=_REFRESH_INTERVAL)
             if self._refresh_stop.is_set():
                 break
 
             now = time.monotonic()
-
-            # Periodically re-assert cbreak mode.  Something between
-            # test execution and here can restore cooked (canonical)
-            # mode, causing single key presses to be buffered.
             if now - last_cbreak >= cbreak_interval:
-                was_cooked = self._display.ensure_cbreak()
+                self._display.ensure_cbreak()
                 last_cbreak = now
-                _dbg = self._debug_log
-                if _dbg is not None:
-                    tag = "FIXED cooked→cbreak" if was_cooked else "ok"
-                    _dbg.write(f"{now:.4f} cbreak check: {tag}\n")
-                    _dbg.flush()
 
-            t0 = time.monotonic()
-            scrolled = self._process_input()
-            t1 = time.monotonic()
+            self._process_input()
             if self._dirty.is_set():
                 self._dirty.clear()
                 self._display.redraw_buffer(
@@ -389,19 +297,6 @@ class ViewManager:
                     scroll_offset=self._user_scroll,
                     status_text=self._status_line.text or None,
                 )
-                t2 = time.monotonic()
-                _dbg = self._debug_log
-                if _dbg is not None and scrolled:
-                    ir = self._input_reader
-                    ir_loops = ir.loop_count if ir else -1
-                    _dbg.write(
-                        f"{t0:.4f} input={1000 * (t1 - t0):.1f}ms "
-                        f"redraw={1000 * (t2 - t1):.1f}ms "
-                        f"total={1000 * (t2 - t0):.1f}ms "
-                        f"scroll={self._user_scroll} "
-                        f"ir_loops={ir_loops}\n"
-                    )
-                    _dbg.flush()
 
     def _stop_refresh_loop(self) -> None:
         """Stop the background refresh thread."""
