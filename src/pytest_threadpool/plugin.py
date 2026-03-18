@@ -1,6 +1,7 @@
 """pytest plugin hooks -- wiring only, delegates to classes."""
 
 import os
+import sys
 import warnings
 
 import pytest
@@ -83,12 +84,59 @@ def pytest_runtestloop(session):
         if is_tty and file is not None:
             width = getattr(tw, "fullwidth", 80) if tw else 80
             view_manager = ViewManager(file, width)
-            view_manager.register("main")
-            view_manager.activate("main")
             session.config._threadpool_view_manager = view_manager  # pyright: ignore[reportPrivateUsage]
+
+            # Show the session header on the alt screen.
+            _add_session_header(session, view_manager)
 
     runner = ParallelRunner(session, nthreads, view_manager=view_manager)
     return runner.run_all()
+
+
+def _add_session_header(session, view_manager) -> None:
+    """Capture pytest's actual session header and replay it on the alt screen.
+
+    Uses the terminal reporter's TerminalWriter to produce the exact
+    same ANSI-formatted output (bold separator, platform info, etc.).
+    """
+    import io as _io
+    import platform
+
+    config = session.config
+    tr = config.pluginmanager.get_plugin("terminalreporter")
+    width = view_manager.width
+
+    # Use pytest's own TerminalWriter to format the header identically.
+    from _pytest._io.terminalwriter import TerminalWriter
+
+    buf = _io.StringIO()
+    tw = TerminalWriter(buf)
+    tw.fullwidth = width
+    tw.hasmarkup = True
+
+    tw.sep("=", "test session starts", bold=True)
+    tw.line(
+        f"platform {sys.platform} -- Python {platform.python_version()}, "
+        f"pytest-{pytest.__version__}"
+    )
+    tw.line(f"rootdir: {config.rootpath}")
+    inipath = config.inipath
+    if inipath and inipath != config.rootpath:
+        tw.line(f"configfile: {inipath}")
+
+    plugininfo = config.pluginmanager.list_plugin_distinfo()
+    if plugininfo:
+        plugin_str = ", ".join(f"{dist.project_name}-{dist.version}" for _, dist in plugininfo)
+        tw.line(f"plugins: {plugin_str}")
+
+    if tr and hasattr(tr, "_session"):
+        nitems = len(session.items) if hasattr(session, "items") else 0
+        tw.line(f"collected {nitems} items")
+
+    # Each line from the TerminalWriter becomes a header line.
+    for line in buf.getvalue().splitlines():
+        view_manager.add_header(line)
+    view_manager.add_header("")  # blank separator line
 
 
 def _thread_count(config) -> int | None:
@@ -106,7 +154,7 @@ def _thread_count(config) -> int | None:
 def pytest_unconfigure(config):
     view_manager = getattr(config, "_threadpool_view_manager", None)
     if view_manager is not None:
-        view_manager.wait_for_interrupt()
+        view_manager.wait_and_leave()
 
 
 def _is_free_threaded() -> bool:

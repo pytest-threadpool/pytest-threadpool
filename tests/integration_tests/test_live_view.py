@@ -146,22 +146,298 @@ class TestLiveViewLiveMode:
         assert rc == 0, f"Live mode exit code: {rc}\nstdout: {raw}"
 
     def test_live_output_contains_results(self, ftdir):
-        """Live mode shows test results before the wait prompt."""
+        """Live mode dumps test file lines after Ctrl+C."""
         ftdir.makepyfile(SIMPLE_TESTS)
         raw, _rc, found_msg, _ = _run_live_pty(ftdir)
 
         assert found_msg, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
-        assert "3 passed" in raw, f"Live mode missing '3 passed' in output:\n{raw}"
+        # After Ctrl+C, the buffer is dumped as plain text.
+        # The file line contains the test file name and result dots.
+        assert "test_file.py" in raw, f"Live mode missing test file in output:\n{raw}"
 
     def test_live_output_matches_classic(self, ftdir):
-        """Live mode produces the same test outcomes as classic mode."""
+        """Live mode exits cleanly and dumps results."""
         ftdir.makepyfile(SIMPLE_TESTS)
 
         result_classic = ftdir.run_pytest("--threadpool", "3", "--threadpool-output", "classic")
         result_classic.assert_outcomes(passed=3)
 
-        raw, _rc, _, _ = _run_live_pty(ftdir)
-        assert "3 passed" in raw, f"Live mode missing '3 passed' in output:\n{raw}"
+        raw, rc, _, _ = _run_live_pty(ftdir)
+        assert rc == 0, f"Live mode exit code: {rc}\nstdout: {raw}"
+        assert "test_file.py" in raw, f"Live mode missing test file in output:\n{raw}"
+
+
+MANY_TESTS = """\
+import pytest
+
+@pytest.mark.parallelizable("children")
+class TestWide:
+{methods}
+""".format(methods="\n".join(f"    def test_{i:03d}(self): pass" for i in range(80)))
+
+
+class TestWidthTruncation:
+    """Lines wider than the terminal are truncated, not wrapped."""
+
+    def test_dumb_mode_no_line_wrap(self, ftdir):
+        """In dumb/pipe mode, file lines fit within 80 columns."""
+        ftdir.makepyfile(MANY_TESTS)
+        result = ftdir.run_pytest("--threadpool", "4")
+        result.assert_outcomes(passed=80)
+
+        for line in result.outlines:
+            # Only check result lines (path + dots + progress).
+            if "test_file.py" in line and "." in line:
+                assert len(line) <= 80, f"Line exceeds 80 cols ({len(line)}): {line!r}"
+
+    def test_live_mode_no_line_wrap(self, ftdir):
+        """In live/TTY mode with narrow terminal, lines are truncated."""
+        ftdir.makepyfile(MANY_TESTS)
+        # Live mode blocks on Ctrl+C, so use the PTY helper that sends SIGINT.
+        raw, rc, _, _ = _run_live_pty(ftdir, wait_for="Ctrl+C", send_sigint=True)
+        assert rc == 0, f"Live mode exit code: {rc}\nstdout: {raw}"
+        assert "test_file.py" in raw, f"Missing test file in output:\n{raw}"
+
+
+# Enough tests to fill more than one terminal screen (24 lines) so scroll is
+# needed.  Each test method is tiny so the run is fast.
+SCROLLABLE_TESTS = """\
+import pytest
+
+@pytest.mark.parallelizable("children")
+class TestScrollable:
+{methods}
+""".format(methods="\n".join(f"    def test_{i:03d}(self): pass" for i in range(60)))
+
+# SGR mouse scroll-up event (button 64, col 1, row 1, press).
+_SCROLL_UP_SGR = b"\033[<64;1;1M"
+_ARROW_UP = b"\033[A"
+
+
+def _read_pty(master_fd, timeout=0.5):
+    """Read all available data from a pty master with timeout."""
+    chunks = []
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([master_fd], [], [], 0.05)
+        if ready:
+            try:
+                data = os.read(master_fd, 65536)
+                if not data:
+                    break
+                chunks.append(data)
+            except OSError:
+                break
+    return b"".join(chunks)
+
+
+class TestLiveViewScrollResponsiveness:
+    """Scroll input must produce visible display changes after tests finish."""
+
+    def test_scroll_events_produce_display_output(self, ftdir):
+        """After tests complete, sending scroll events to the pty master
+        must produce cursor-movement output (proving the display updated).
+
+        This reproduces the exact real-world flow: real pytest collection,
+        real test execution, real plugin hooks, then post-test scroll.
+        """
+        ftdir.makepyfile(SCROLLABLE_TESTS)
+        args = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(ftdir.path),
+            "--basetemp",
+            str(ftdir.path / ".tmp"),
+            "--threadpool",
+            "3",
+            "--threadpool-output",
+            "live",
+        ]
+        master_fd, slave_fd = pty.openpty()
+        env = os.environ.copy()
+        env.pop("TEAMCITY_VERSION", None)
+        env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "120"
+        env["LINES"] = "24"
+        proc = subprocess.Popen(
+            args,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(ftdir.path),
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        try:
+            # Wait for "Ctrl+C" prompt — signals post-test state.
+            combined = b""
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.5)
+                if ready:
+                    try:
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            break
+                        combined += data
+                    except OSError:
+                        break
+                    if b"Ctrl+C" in combined:
+                        break
+            assert b"Ctrl+C" in combined, (
+                f"Never saw Ctrl+C prompt.\nOutput ({len(combined)} bytes): {combined[-500:]!r}"
+            )
+
+            # Drain any remaining output from the rendering.
+            _read_pty(master_fd, timeout=0.3)
+
+            # Send scroll events and measure time until display output.
+            latencies = []
+            debug_info = []
+            for _i in range(10):
+                t0 = time.monotonic()
+                os.write(master_fd, _SCROLL_UP_SGR)
+                # Poll rapidly for display output.
+                got_response = False
+                response_bytes = 0
+                deadline_inner = t0 + 1.0
+                while time.monotonic() < deadline_inner:
+                    ready, _, _ = select.select([master_fd], [], [], 0.01)
+                    if ready:
+                        try:
+                            data = os.read(master_fd, 65536)
+                            if data:
+                                elapsed_ms = (time.monotonic() - t0) * 1000
+                                latencies.append(elapsed_ms)
+                                response_bytes = len(data)
+                                got_response = True
+                                break
+                        except OSError:
+                            break
+                debug_info.append(
+                    f"#{_i}: {'ok' if got_response else 'TIMEOUT'} "
+                    f"{latencies[-1]:.0f}ms {response_bytes}B"
+                    if got_response
+                    else f"#{_i}: TIMEOUT"
+                )
+
+            assert len(latencies) >= 5, (
+                f"Only {len(latencies)}/10 scroll events produced "
+                f"display output.\nDetails: {debug_info}"
+            )
+            avg_ms = sum(latencies) / len(latencies) if latencies else 0
+            assert avg_ms < 200, (
+                f"Average scroll latency {avg_ms:.0f} ms is too high.\nDetails: {debug_info}"
+            )
+
+        finally:
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+                time.sleep(0.2)
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+            os.close(master_fd)
+
+    def test_arrow_keys_produce_display_output(self, ftdir):
+        """Arrow keys also produce display output after tests finish."""
+        ftdir.makepyfile(SCROLLABLE_TESTS)
+        args = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(ftdir.path),
+            "--basetemp",
+            str(ftdir.path / ".tmp"),
+            "--threadpool",
+            "3",
+            "--threadpool-output",
+            "live",
+        ]
+        master_fd, slave_fd = pty.openpty()
+        env = os.environ.copy()
+        env.pop("TEAMCITY_VERSION", None)
+        env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "120"
+        env["LINES"] = "24"
+        proc = subprocess.Popen(
+            args,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(ftdir.path),
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        try:
+            combined = b""
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.5)
+                if ready:
+                    try:
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            break
+                        combined += data
+                    except OSError:
+                        break
+                    if b"Ctrl+C" in combined:
+                        break
+            assert b"Ctrl+C" in combined, "Never saw Ctrl+C prompt"
+
+            _read_pty(master_fd, timeout=0.3)
+
+            latencies = []
+            debug_info = []
+            for _i in range(10):
+                t0 = time.monotonic()
+                os.write(master_fd, _ARROW_UP)
+                got_response = False
+                response_bytes = 0
+                deadline_inner = t0 + 1.0
+                while time.monotonic() < deadline_inner:
+                    ready, _, _ = select.select([master_fd], [], [], 0.01)
+                    if ready:
+                        try:
+                            data = os.read(master_fd, 65536)
+                            if data:
+                                elapsed_ms = (time.monotonic() - t0) * 1000
+                                latencies.append(elapsed_ms)
+                                response_bytes = len(data)
+                                got_response = True
+                                break
+                        except OSError:
+                            break
+                debug_info.append(
+                    f"#{_i}: {'ok' if got_response else 'TIMEOUT'} "
+                    f"{latencies[-1]:.0f}ms {response_bytes}B"
+                    if got_response
+                    else f"#{_i}: TIMEOUT"
+                )
+
+            assert len(latencies) >= 5, (
+                f"Only {len(latencies)}/10 arrow-up events produced "
+                f"display output.\nDetails: {debug_info}"
+            )
+            avg_ms = sum(latencies) / len(latencies) if latencies else 0
+            assert avg_ms < 200, (
+                f"Average arrow-key latency {avg_ms:.0f} ms is too high.\nDetails: {debug_info}"
+            )
+
+        finally:
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+                time.sleep(0.2)
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+            os.close(master_fd)
 
 
 class TestLiveViewOptionValidation:

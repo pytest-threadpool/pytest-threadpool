@@ -214,13 +214,14 @@ class _LiveReporter:
         # We need it for direct ANSI escape writes (cursor movement, colors)
         # that bypass TerminalWriter formatting.
         raw_file = self._tw._file if self._tw else None  # pyright: ignore[reportPrivateUsage]
+        self._file = raw_file
 
-        # When a ViewManager is active, route writes through the "main"
-        # channel so the ViewManager controls rendering.
-        if view_manager is not None and "main" in view_manager.channels:
-            self._file = view_manager.channels["main"]
-        else:
-            self._file = raw_file
+        # When a ViewManager is active, allocate rows in its shared
+        # ScreenBuffer for this group's file lines + progress line.
+        self._vm_row_offset = -1
+        if view_manager is not None and self._live:
+            nlines = len(self._file_order) + 1  # file lines + progress
+            self._vm_row_offset = view_manager.allocate_lines(nlines)
 
         # When True, the next dumb-mode file line prefixes with \n
         # to separate from preceding sequential output.
@@ -277,6 +278,14 @@ class _LiveReporter:
     def pre_print(self):
         """Print all collected file lines with dim scheduled dots and a progress line."""
         if not self._live:
+            return
+        if self._vm_row_offset >= 0 and self._view_manager is not None:
+            # Vim-style: populate our rows in the shared buffer, redraw.
+            off = self._vm_row_offset
+            for i, fspath in enumerate(self._file_order):
+                self._view_manager.set_line(off + i, self._build_line_live(fspath))
+            self._view_manager.set_line(off + len(self._file_order), self._build_progress_line())
+            self._view_manager.redraw()
             return
         assert self._file is not None
         f = self._file
@@ -347,24 +356,64 @@ class _LiveReporter:
         """Reset terminal reporter state after live output."""
         if self._passive:
             return
+        if self._vm_row_offset >= 0 and self._view_manager is not None:
+            # Alt screen stays up.  ViewManager.wait_and_leave() in
+            # pytest_unconfigure will wait for Ctrl+C, then leave alt
+            # screen and dump buffer contents to normal stdout.
+            # Redirect terminal reporter output into the ViewManager
+            # buffer so the failure summary appears on the alt screen
+            # and gets dumped when leaving.
+            if self._tr:
+                self._tr.currentfspath = None
+                self._tr._write_progress_information_filling_space = lambda: None  # pyright: ignore[reportPrivateUsage]
+                if self._tw:
+                    vm = self._view_manager
+                    _pending: list[str] = []
+
+                    def _redirect_write(*a, **kw) -> None:
+                        text = a[0] if a else ""
+                        if not text:
+                            return
+                        _pending.append(text)
+                        # Flush complete lines into the buffer.
+                        joined = "".join(_pending)
+                        while "\n" in joined:
+                            line, joined = joined.split("\n", 1)
+                            vm.add_content(line)
+                        _pending.clear()
+                        if joined:
+                            _pending.append(joined)
+
+                    def _redirect_line(*a, **kw) -> None:
+                        text = a[0] if a else ""
+                        _pending.append(text)
+                        joined = "".join(_pending)
+                        for part in joined.split("\n"):
+                            vm.add_content(part)
+                        _pending.clear()
+
+                    self._tw.write = _redirect_write  # pyright: ignore[reportAttributeAccessIssue]
+                    self._tw.line = _redirect_line  # pyright: ignore[reportAttributeAccessIssue]
+            return
         if self._live and self._tw and self._file:
-            # End the progress line and move cursor back up so the
-            # terminal reporter's next _tw.line() call (from
-            # write_fspath_result or the summary separator) brings
-            # the cursor back down without creating a blank line.
+            # Non-alternate-screen fallback.
             self._file.write("\n\033[A")
             self._file.flush()
         if self._tr:
             self._tr.currentfspath = None
-            # noinspection PyProtectedMember
-            # No public API to suppress the final "[100%]" that the terminal
-            # reporter's pytest_runtestloop wrapper writes after the test loop.
             self._tr._write_progress_information_filling_space = lambda: None  # pyright: ignore[reportPrivateUsage]
 
     # -- internals ------------------------------------------------------------
 
     def _update_file_line(self, fspath):
         """Rewrite a single file line and progress using cursor movement (live mode)."""
+        if self._vm_row_offset >= 0 and self._view_manager is not None:
+            off = self._vm_row_offset
+            idx = self._file_idx[fspath]
+            self._view_manager.set_line(off + idx, self._build_line_live(fspath))
+            self._view_manager.set_line(off + len(self._file_order), self._build_progress_line())
+            self._view_manager.redraw()
+            return
         assert self._file is not None
         f = self._file
         idx = self._file_idx[fspath]
@@ -377,26 +426,63 @@ class _LiveReporter:
         self._write_progress_line()
         f.flush()
 
-    def _write_line_live(self, fspath):
-        """Write a file line with ANSI formatting (live terminal mode)."""
-        assert self._file is not None
-        f = self._file
+    def _build_line_live(self, fspath) -> str:
+        """Build a file line string with ANSI formatting (live terminal mode).
+
+        Returns a string of visible text + ANSI codes.  The ScreenBuffer
+        handles width clamping and padding.
+        """
+        items = self._file_items[fspath]
         rel = self._rel_path(fspath)
+        width = self._width
 
-        f.write("\r\033[K")
-        f.write(rel + " ")
+        # Budget: path + space + one char per item must fit in width.
+        usable = width - 1
+        needed = len(rel) + 1 + len(items)
 
-        for item in self._file_items[fspath]:
-            state, letter, color = self._item_state[item]
+        if needed > usable:
+            max_path = usable - 1 - len(items)
+            if max_path >= 4:
+                rel = rel[: max_path - 1] + "…"
+            elif max_path >= 1:
+                rel = "…"
+            else:
+                rel = ""
+
+        parts: list[str] = []
+        col = 0
+        if rel:
+            parts.append(rel + " ")
+            col = len(rel) + 1
+
+        for item in items:
+            if col >= usable:
+                break
+            state, _letter, color = self._item_state[item]
             if state == _SCHEDULED:
-                f.write(f"{_DIM}·{_RESET}")
+                parts.append(f"{_DIM}·{_RESET}")
             elif state == _RUNNING:
-                f.write(f"{_CYAN_BOLD}●{_RESET}")
+                parts.append(f"{_CYAN_BOLD}●{_RESET}")
             else:
                 if color:
-                    f.write(f"{color}{letter}{_RESET}")
+                    parts.append(f"{color}{_letter}{_RESET}")
                 else:
-                    f.write(letter)  # pragma: no cover -- live mode requires TTY with markup
+                    parts.append(_letter)
+            col += 1
+
+        return "".join(parts)
+
+    def _write_line_live(self, fspath):
+        """Write a file line with ANSI formatting (live terminal mode).
+
+        Truncates the path and/or test indicators if the line would
+        exceed the terminal width, preventing wrap-induced cursor
+        miscalculation.
+        """
+        assert self._file is not None
+        f = self._file
+        f.write("\r\033[K")
+        f.write(self._build_line_live(fspath))
 
     def _maybe_flush_file(self, fspath):
         """In dumb mode, write a file line once all its tests are done."""
@@ -407,25 +493,61 @@ class _LiveReporter:
             self._write_line_plain(fspath)
 
     def _write_line_plain(self, fspath):
-        """Write a file line without ANSI codes (dumb/pipe mode)."""
+        """Write a file line without ANSI codes (dumb/pipe mode).
+
+        Truncates the path and/or test indicators if the full line
+        would exceed terminal width.
+        """
         assert self._file is not None
         f = self._file
         rel = self._rel_path(fspath)
+        items = self._file_items[fspath]
         progress = f" [{100 * self._reported // self._total:3d}%]"
 
-        letters = "".join(self._item_state[item][1] for item in self._file_items[fspath])
+        letters = "".join(self._item_state[item][1] for item in items)
+
+        # path + space + letters + progress
+        usable = self._width - 1
+        line_len = len(rel) + 1 + len(letters) + len(progress)
+        if line_len > usable:
+            # Try truncating path first.
+            max_path = usable - 1 - len(letters) - len(progress)
+            if max_path >= 4:
+                rel = rel[: max_path - 1] + "…"
+            elif max_path >= 1:
+                rel = "…"
+            else:
+                # Path can't shrink enough — truncate letters too.
+                rel = "…"
+                max_letters = usable - 1 - 1 - len(progress)  # "… " + letters + progress
+                letters = letters[:max_letters] if max_letters > 0 else ""
 
         prefix = "\n" if self._needs_leading_newline else ""
         self._needs_leading_newline = False
         f.write(f"{prefix}{rel} {letters}{progress}\n")
         f.flush()
 
+    def _build_progress_line(self) -> str:
+        """Build the progress line string.
+
+        The ScreenBuffer handles width clamping and padding.
+        """
+        pct = 100 * self._reported // self._total
+        return f"{self._reported}/{self._total} [{pct:3d}%]"
+
     def _write_progress_line(self):
-        """Write/update the progress line at the bottom."""
+        """Write/update the progress line at the bottom.
+
+        Truncated to terminal width (unlikely to overflow but
+        enforced for consistency).
+        """
         assert self._file is not None
         f = self._file
-        pct = 100 * self._reported // self._total
-        f.write(f"\r\033[K{self._reported}/{self._total} [{pct:3d}%]")
+        text = self._build_progress_line()
+        usable = self._width - 1
+        if len(text) > usable:
+            text = text[:usable]
+        f.write(f"\r\033[K{text}")
 
     def _rel_path(self, fspath):
         try:

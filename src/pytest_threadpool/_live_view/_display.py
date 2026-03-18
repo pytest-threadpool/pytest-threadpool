@@ -1,0 +1,266 @@
+"""Low-level terminal I/O: alternate screen, cbreak, raw writes."""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import sys
+import termios
+import threading
+import tty
+from typing import TYPE_CHECKING
+
+from pytest_threadpool._live_view._ansi import (
+    clear_screen,
+    disable_mouse_tracking,
+    enable_mouse_tracking,
+    enter_alt_screen,
+    exit_alt_screen,
+    hide_cursor,
+    move_to,
+    pad_line,
+    show_cursor,
+)
+
+if TYPE_CHECKING:
+    from typing import IO
+
+    from pytest_threadpool._live_view._buffer import ScreenBuffer
+
+
+class Display:
+    """Alternate-screen terminal display.
+
+    Enters alt screen, sets cbreak mode, hides cursor.
+    ``write_region`` writes pre-formatted lines to a rectangular area.
+    ``redraw_buffer`` renders a ScreenBuffer viewport with auto-scroll
+    and dirty-line tracking (backward-compatible path).
+    """
+
+    def __init__(self, file: IO[str], width: int, height: int) -> None:
+        self._file = file
+        self._width = width
+        self._height = height
+        self._in_alt = False
+        self._mouse_enabled = False
+        self._lock = threading.Lock()
+        self._saved_termios: list | None = None
+        self._tty_fd: int = -1
+        # Dirty-tracking for redraw_buffer (backward-compat).
+        self._rendered: dict[int, tuple[int, str]] = {}
+        self._scroll_offset = 0
+
+    def enter(self) -> None:
+        """Enter alternate screen, set cbreak mode, hide cursor."""
+        self._tty_fd = self._get_tty_fd()
+        if self._tty_fd >= 0:
+            try:
+                self._saved_termios = termios.tcgetattr(self._tty_fd)
+                tty.setcbreak(self._tty_fd)
+            except termios.error:
+                self._saved_termios = None
+
+        self._file.write(enter_alt_screen() + hide_cursor() + clear_screen())
+        self._file.flush()
+        self._in_alt = True
+
+    def leave(self) -> None:
+        """Leave alternate screen, restore terminal mode, show cursor."""
+        if self._in_alt:
+            if self._mouse_enabled:
+                self.disable_mouse()
+            self._file.write(show_cursor() + exit_alt_screen())
+            self._file.flush()
+            self._in_alt = False
+            self._rendered.clear()
+
+        if self._saved_termios is not None and self._tty_fd >= 0:
+            with contextlib.suppress(termios.error):
+                termios.tcsetattr(self._tty_fd, termios.TCSAFLUSH, self._saved_termios)
+            self._saved_termios = None
+
+    def ensure_cbreak(self) -> bool:
+        """Re-assert cbreak mode on the tty fd.
+
+        Called periodically to guarantee that character-at-a-time input
+        is active even if another component (e.g. pytest's capture
+        plugin cleanup) restored cooked mode.
+
+        Returns ``True`` if the terminal was found in cooked mode and
+        had to be fixed.
+        """
+        if self._tty_fd < 0:
+            return False
+        try:
+            mode = termios.tcgetattr(self._tty_fd)
+            was_cooked = bool(mode[3] & termios.ICANON)
+            if was_cooked:
+                tty.setcbreak(self._tty_fd)
+            return was_cooked
+        except termios.error:
+            return False
+
+    def enable_mouse(self) -> None:
+        """Enable mouse tracking (SGR extended mode)."""
+        if not self._mouse_enabled:
+            self._file.write(enable_mouse_tracking())
+            self._file.flush()
+            self._mouse_enabled = True
+
+    def force_enable_mouse(self) -> None:
+        """Unconditionally re-send mouse tracking enable sequences.
+
+        Use when mouse tracking may have been inadvertently disabled
+        by content written to the terminal (e.g. pytest summary output
+        containing escape sequences).
+        """
+        self._file.write(enable_mouse_tracking())
+        self._file.flush()
+        self._mouse_enabled = True
+
+    def disable_mouse(self) -> None:
+        """Disable mouse tracking."""
+        if self._mouse_enabled:
+            self._file.write(disable_mouse_tracking())
+            self._file.flush()
+            self._mouse_enabled = False
+
+    def write_region(self, row: int, col: int, lines: list[str], width: int) -> None:
+        """Write *lines* to a rectangular screen region starting at (*row*, *col*).
+
+        Each line is assumed to already be padded/formatted to *width*.
+        Row and col are 0-based.
+        """
+        with self._lock:
+            parts: list[str] = []
+            for i, line in enumerate(lines):
+                parts.append(move_to(row + i + 1, col + 1))  # 1-based
+                parts.append(line)
+            if parts:
+                self._file.write("".join(parts))
+                self._file.flush()
+
+    def redraw_buffer(
+        self,
+        buffer: ScreenBuffer,
+        *,
+        scroll_offset: int | None = None,
+        status_text: str | None = None,
+    ) -> None:
+        """Render a ScreenBuffer viewport with dirty tracking.
+
+        When *scroll_offset* is ``None`` (default), auto-scrolls to keep
+        the bottom visible.  Pass an explicit offset to override.
+
+        When *status_text* is provided it is rendered on the last terminal
+        row with reverse-video styling, and the content viewport is reduced
+        by one row.
+        """
+        if not self._in_alt:
+            return
+
+        with self._lock:
+            lines = buffer.snapshot()
+            total = len(lines)
+            # Reserve the last row for the status line when present.
+            vp = self._height - 1 if status_text is not None else self._height
+
+            if scroll_offset is not None:
+                max_off = max(0, total - vp)
+                self._scroll_offset = max(0, min(scroll_offset, max_off))
+            elif total <= vp:
+                self._scroll_offset = 0
+            else:
+                self._scroll_offset = total - vp
+
+            parts: list[str] = []
+            rows_to_show = min(total, vp)
+
+            for screen_row in range(rows_to_show):
+                buf_row = self._scroll_offset + screen_row
+                content = lines[buf_row]
+                cache_key = (self._scroll_offset, content)
+                if self._rendered.get(screen_row) == cache_key:
+                    continue
+                parts.append(move_to(screen_row + 1, 1))
+                parts.append(pad_line(content, self._width - 1))
+                self._rendered[screen_row] = cache_key
+
+            for screen_row in range(rows_to_show, vp):
+                empty_key = (self._scroll_offset, "")
+                if self._rendered.get(screen_row) == empty_key:
+                    continue
+                parts.append(move_to(screen_row + 1, 1))
+                parts.append(" " * (self._width - 1))
+                self._rendered[screen_row] = empty_key
+
+            # Status line on the last terminal row (reverse video).
+            if status_text is not None:
+                status_row = self._height  # last row (1-based)
+                rendered = f"\033[7m{pad_line(status_text, self._width - 1)}\033[0m"
+                status_key = (-1, status_text)
+                if self._rendered.get(status_row) != status_key:
+                    parts.append(move_to(status_row, 1))
+                    parts.append(rendered)
+                    self._rendered[status_row] = status_key
+
+            if parts:
+                self._file.write("".join(parts))
+                self._file.flush()
+
+    def dump_lines(self, lines: list[str]) -> None:
+        """Print lines with colors to the file (after leaving alt screen)."""
+        for line in lines:
+            self._file.write(line + "\033[0m\n")
+        self._file.flush()
+
+    def flush(self) -> None:
+        self._file.flush()
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def in_alt(self) -> bool:
+        return self._in_alt
+
+    def _get_tty_fd(self) -> int:
+        """Get a file descriptor for the controlling terminal.
+
+        Only opens ``/dev/tty`` as a last resort when the Display's
+        own file is a real tty.  Opening ``/dev/tty`` when the file
+        is a StringIO (unit tests) would create competing fds that
+        share the kernel input buffer with the real ViewManager's fd.
+        """
+        # Try Python's sys.stdin first (handles reassignment by plugins).
+        try:
+            fd = sys.stdin.fileno()
+            if os.isatty(fd):
+                return fd
+        except (OSError, ValueError):
+            pass
+        # Try raw fd 0 — sys.stdin may have been replaced by pytest's
+        # capture plugin, but fd 0 itself may still be the tty.
+        try:
+            if os.isatty(0):
+                return 0
+        except OSError:
+            pass
+        # Only open /dev/tty if our output file is actually a terminal.
+        # Test code using StringIO must not open /dev/tty — those fds
+        # would share the kernel input buffer with the real tty reader.
+        try:
+            file_fd = self._file.fileno()
+            if not os.isatty(file_fd):
+                return -1
+        except (OSError, ValueError, AttributeError):
+            return -1
+        try:
+            return os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+        except OSError:
+            return -1
