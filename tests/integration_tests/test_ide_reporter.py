@@ -7,6 +7,9 @@ other JetBrains IDEs can detect test results.
 Also verifies output scoping in TeamCity mode: each test's ``testStdOut``
 contains only its own function-level output, with shared-scope fixture
 output (session/package/module/class) excluded from individual tests.
+
+Tests cover both explicit ``--teamcity`` flag and ``TEAMCITY_VERSION``
+environment variable activation (PyCharm's mechanism).
 """
 
 import re
@@ -252,3 +255,99 @@ class TestTeamCityCapturedOutput:
             assert "[100%]" not in out, (
                 f"{test_name}: file progress line leaked into testStdOut\nstdout:\n{result.stdout}"
             )
+
+
+# ---------------------------------------------------------------------------
+# TEAMCITY_VERSION env var activation (PyCharm scenario)
+# ---------------------------------------------------------------------------
+
+_TC_ENV = {"TEAMCITY_VERSION": "2024.1"}
+
+
+class TestEnvVarActivation:
+    """Verify TC mode activates via TEAMCITY_VERSION env var (no --teamcity flag).
+
+    PyCharm sets TEAMCITY_VERSION instead of passing --teamcity on the CLI.
+    These tests ensure pytest-threadpool detects that and enables all
+    TC-specific behavior (collection-order reporting, file-line suppression,
+    shared-scope output scoping).
+    """
+
+    def test_tc_messages_emitted_via_env(self, ftdir):
+        """TC service messages are emitted when activated via env var."""
+        ftdir.copy_case("class_barrier_concurrency")
+        result = ftdir.run_pytest("--threadpool", "3", "-s", extra_env=_TC_ENV)
+        result.assert_outcomes(passed=3)
+
+        msgs = _tc_messages(result.stdout)
+        started = [m for m in msgs if m["_type"] == "testStarted"]
+        finished = [m for m in msgs if m["_type"] == "testFinished"]
+        assert len(started) == 3, (
+            f"Expected 3 testStarted via env var, got {len(started)}\nstdout:\n{result.stdout}"
+        )
+        assert len(finished) == 3, (
+            f"Expected 3 testFinished via env var, got {len(finished)}\nstdout:\n{result.stdout}"
+        )
+
+    def test_no_file_progress_line_via_env(self, ftdir):
+        """Dumb-mode file progress lines are suppressed via env var activation."""
+        ftdir.copy_case("capture_scoped_output")
+        result = ftdir.run_pytest("--threadpool", "3", extra_env=_TC_ENV)
+        result.assert_outcomes(passed=5)
+
+        msgs = _tc_messages(result.stdout)
+        for test_name in ("test_alpha", "test_beta", "test_param(0)"):
+            out = _tc_test_stdout(msgs, test_name)
+            assert "[100%]" not in out, (
+                f"{test_name}: file progress line leaked via env var activation\n"
+                f"stdout:\n{result.stdout}"
+            )
+
+    def test_shared_scope_excluded_via_env(self, ftdir):
+        """Shared-scope output excluded from testStdOut via env var activation."""
+        ftdir.copy_case("capture_scoped_output")
+        result = ftdir.run_pytest("--threadpool", "3", extra_env=_TC_ENV)
+        result.assert_outcomes(passed=5)
+
+        msgs = _tc_messages(result.stdout)
+        for test_name in ("test_alpha", "test_beta", "test_param(0)", "test_param(1)"):
+            out = _tc_test_stdout(msgs, test_name)
+            for tag in _SHARED_SETUP_TAGS + _SHARED_TEARDOWN_TAGS:
+                assert tag not in out, (
+                    f"{test_name}: {tag} leaked into testStdOut via env var\n"
+                    f"stdout:\n{result.stdout}"
+                )
+
+    def test_captured_output_in_messages_via_env(self, ftdir):
+        """Worker print() output appears in testStdOut via env var activation."""
+        ftdir.copy_case("capture_print_parallel")
+        result = ftdir.run_pytest("--threadpool", "4", "-s", extra_env=_TC_ENV)
+        result.assert_outcomes(passed=4)
+
+        msgs = _tc_messages(result.stdout)
+        captured = "".join(m.get("out", "") for m in msgs if m["_type"] == "testStdOut")
+        for i in range(4):
+            assert f"WORKER_OUTPUT_{i}" in captured, (
+                f"Missing WORKER_OUTPUT_{i} via env var activation\nstdout:\n{result.stdout}"
+            )
+
+    def test_collection_order_via_env(self, ftdir):
+        """Parametrized tests reported in collection order via env var activation."""
+        ftdir.copy_case("capture_print_parallel")
+        result = ftdir.run_pytest("--threadpool", "4", "-s", extra_env=_TC_ENV)
+        result.assert_outcomes(passed=4)
+
+        msgs = _tc_messages(result.stdout)
+        finished = [m["name"] for m in msgs if m["_type"] == "testFinished"]
+        # All parametrized variants should be consecutive (not interleaved with other tests)
+        param_names = [n for n in finished if "test_print_worker" in n]
+        assert len(param_names) == 4, (
+            f"Expected 4 parametrized test results, got {len(param_names)}\n"
+            f"stdout:\n{result.stdout}"
+        )
+        # They should appear as a contiguous block in the finished list
+        first_idx = finished.index(param_names[0])
+        assert finished[first_idx : first_idx + 4] == param_names, (
+            f"Parametrized tests not contiguous in output order\n"
+            f"finished: {finished}\nstdout:\n{result.stdout}"
+        )

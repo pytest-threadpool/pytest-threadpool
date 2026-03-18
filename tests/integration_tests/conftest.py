@@ -109,7 +109,7 @@ class FreethreadedTestDir:
             env.setdefault("COVERAGE_FILE", str(PROJECT_ROOT / ".coverage"))
         return env
 
-    def run_pytest(self, *extra_args, timeout=30):
+    def run_pytest(self, *extra_args, timeout=30, extra_env=None):
         """Run pytest in a subprocess (piped, non-TTY)."""
         args = [
             sys.executable,
@@ -120,13 +120,16 @@ class FreethreadedTestDir:
             str(self.path / ".tmp"),
             *extra_args,
         ]
+        env = self._coverage_env()
+        if extra_env:
+            env.update(extra_env)
         result = subprocess.run(
             args,
             capture_output=True,
             text=True,
             timeout=timeout,
             cwd=str(self.path),
-            env=self._coverage_env(),
+            env=env,
         )
         return RunResult(result.stdout, result.stderr, result.returncode)
 
