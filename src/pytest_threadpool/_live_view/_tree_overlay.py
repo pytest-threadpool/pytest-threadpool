@@ -276,7 +276,7 @@ class TreeOverlay:
         # Branch — collect all descendant leaf nodeids.
         nodeids = self._collect_leaves(node)
         if nodeids:
-            return "jumpgroup:" + "\t".join(nodeids)
+            return f"jumpgroup:{node.label}\t" + "\t".join(nodeids)
         return None
 
     _FAIL_OUTCOMES = frozenset({"failed", "error", "xpass"})

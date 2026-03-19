@@ -65,7 +65,7 @@ class ViewManager:
         self._hint_text = (
             "  \u2191\u2193 scroll  PgUp/PgDn  Home/End"
             "  Tab tree  Ctrl+\u2190\u2192 focus"
-            "  /search  Ctrl+S save  Ctrl+P/X filter  Ctrl+C exit"
+            "  /search  Ctrl+W save  Ctrl+P/X filter  Ctrl+C exit"
         )
         self._cursor = Cursor()
         self._layout = LayoutManager()
@@ -102,6 +102,8 @@ class ViewManager:
         self._test_outcomes: dict[str, str] = {}
         # Which buffer the right pane is showing (None = main content).
         self._active_nodeid: str | None = None
+        # Display name for the active view (used for save filename).
+        self._active_label: str = "summary"
         # Content pane search (Ctrl+/ to activate, n/N to navigate).
         self._content_search: str = ""
         self._content_search_active: bool = False
@@ -301,8 +303,6 @@ class ViewManager:
             if isinstance(event, KeyEvent) and event.key == "Tab":
                 if self._overlay is not None:
                     self._overlay = None
-                    self._active_nodeid = None
-                    self._user_scroll = None
                     self._display._rendered.clear()
                     self._mark_dirty(Region.CONTENT)
                     return True
@@ -351,19 +351,24 @@ class ViewManager:
                     if result == "close":
                         # Return to main summary view.
                         self._active_nodeid = None
+                        self._active_label = "summary"
                         self._user_scroll = None
                         self._display._rendered.clear()
                         self._mark_dirty(Region.CONTENT, Region.OVERLAY)
                         return True
                     if result is not None and result.startswith("jumpgroup:"):
                         # Switch right pane to combined group output.
-                        nodeids = result[10:].split("\t")
+                        parts = result[10:].split("\t")
+                        label, nodeids = parts[0], parts[1:]
                         self._show_group(nodeids)
+                        self._active_label = label
                         overlay_changed = True
                         continue
                     if result is not None and result.startswith("jump:"):
                         # Switch right pane to a single test's output.
-                        self._active_nodeid = result[5:]
+                        nodeid = result[5:]
+                        self._active_nodeid = nodeid
+                        self._active_label = nodeid.rsplit("::", 1)[-1]
                         self._user_scroll = None
                         self._display._rendered.clear()
                         self._mark_dirty(Region.CONTENT)
@@ -450,8 +455,8 @@ class ViewManager:
         if key == "N" and self._content_match_lines:
             return self._jump_content_match(-1)
 
-        # --- Save to file ---
-        if key == "Ctrl+s":
+        # --- Save to file (Ctrl+W; Ctrl+S is intercepted by terminal XOFF) ---
+        if key == "Ctrl+w":
             self._save_active_buffer()
             return True
 
@@ -524,15 +529,14 @@ class ViewManager:
         # Strip ANSI from all lines.
         plain = [_ANSI_RE.sub("", line) for line in lines]
 
-        # Build filename from active nodeid or "summary".
-        nodeid = self._active_nodeid or "summary"
-        # Sanitise: replace path separators and :: with underscores.
-        name = nodeid.replace("/", "_").replace("::", "_").replace("\t", "_")
-        # Truncate overly long names.
+        # Build filename from active label.
+        name = self._active_label.replace("/", "_").replace("::", "_").replace(" ", "_")
         if len(name) > 80:
             name = name[:80]
         ts = _time.strftime("%Y%m%d_%H%M%S")
-        filename = f"{name}_{ts}.log"
+        log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        filename = os.path.join(log_dir, f"{name}_{ts}.log")
 
         try:
             with open(filename, "w") as f:

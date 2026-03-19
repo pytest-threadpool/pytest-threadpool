@@ -163,6 +163,9 @@ cython_debug/
 .idea/
 uv.lock
 
+# Live-view saved logs
+logs/
+
 # hatch-vcs generated version file
 src/pytest_threadpool/_version.py
 
