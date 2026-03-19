@@ -164,15 +164,13 @@ def _format_test_output(item, report, call_rep) -> list[str]:
     }.get(outcome, "")
     reset = _RESET if color else ""
     lines.append(f"{color}{outcome}{reset}  {item.nodeid}")
-    lines.append("")
 
     # Sections (captured stdout, stderr, log).
     source = call_rep if call_rep is not None else report
     for section_name, section_content in getattr(source, "sections", []):
         lines.append(f"{_DIM}--- {section_name} ---{_RESET}")
-        for line in section_content.splitlines():
+        for line in section_content.rstrip("\n").splitlines():
             lines.append(line)
-        lines.append("")
 
     # Traceback / longrepr.
     longrepr = getattr(source, "longrepr", None)

@@ -133,8 +133,8 @@ class ViewManager:
         """Store captured output lines for a specific test.
 
         Called by the runner after each test completes.  If the user
-        is currently viewing this test's output, the content pane
-        is refreshed.
+        is currently viewing this test (or a group containing it),
+        the content pane is refreshed.
         """
         buf = ScreenBuffer()
         if lines:
@@ -142,7 +142,15 @@ class ViewManager:
             for i, line in enumerate(lines):
                 buf.set_line(row + i, line)
         self._test_buffers[nodeid] = buf
-        if self._active_nodeid == nodeid:
+
+        active = self._active_nodeid
+        if active is None:
+            return
+        if active == nodeid:
+            self._mark_dirty(Region.CONTENT)
+        elif "\t" in active and nodeid in active.split("\t"):
+            # Active view is a group containing this test — rebuild it.
+            self._rebuild_group(active.split("\t"))
             self._mark_dirty(Region.CONTENT)
 
     @property
@@ -151,11 +159,7 @@ class ViewManager:
         if self._active_nodeid is not None:
             buf = self._test_buffers.get(self._active_nodeid)
             if buf is None:
-                # Test hasn't finished yet — show a placeholder.
                 buf = ScreenBuffer()
-                row = buf.add_lines(2)
-                buf.set_line(row, self._active_nodeid)
-                buf.set_line(row + 1, "\033[2m(running...)\033[0m")
                 self._test_buffers[self._active_nodeid] = buf
             return buf
         return self._compat_buffer
@@ -375,32 +379,25 @@ class ViewManager:
         return True
 
     def _show_group(self, nodeids: list[str]) -> None:
-        """Build a combined buffer from multiple test outputs and show it."""
+        """Switch the content pane to show combined output for a group."""
+        self._rebuild_group(nodeids)
+        self._active_nodeid = "\t".join(nodeids)
+        self._user_scroll = None
+        self._display._rendered.clear()
+        self._mark_dirty(Region.CONTENT)
+
+    def _rebuild_group(self, nodeids: list[str]) -> None:
+        """Build (or rebuild) the combined buffer for a group of tests."""
         group_key = "\t".join(nodeids)
         buf = ScreenBuffer()
-        row = 0
         for nid in nodeids:
             test_buf = self._test_buffers.get(nid)
             if test_buf is not None:
                 for line in test_buf.snapshot():
                     r = buf.add_lines(1)
                     buf.set_line(r, line)
-                    row = r + 1
-            else:
-                r = buf.add_lines(2)
-                buf.set_line(r, nid)
-                buf.set_line(r + 1, "\033[2m(running...)\033[0m")
-                row = r + 2
-            # Separator between tests.
-            if row > 0:
-                r = buf.add_lines(1)
-                buf.set_line(r, "")
-                row = r + 1
+            # No placeholder for missing tests — they'll appear when done.
         self._test_buffers[group_key] = buf
-        self._active_nodeid = group_key
-        self._user_scroll = None
-        self._display._rendered.clear()
-        self._mark_dirty(Region.CONTENT)
 
     def _apply_content_key(self, key: str) -> bool:
         """Apply a keyboard event to the content pane. Returns True if changed."""
