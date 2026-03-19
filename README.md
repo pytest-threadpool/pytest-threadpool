@@ -217,12 +217,22 @@ Available when `--threadpool-output live` is active:
 | `↑` `↓`           | Scroll content / move tree cursor                    |
 | `PgUp` `PgDn`     | Page scroll                                          |
 | `Home` `End`      | Jump to top / bottom                                 |
-| `Tab`             | Toggle tree panel                                    |
-| `Enter`           | Expand/collapse tree node, or select                 |
+| `Tab`             | Toggle tree panel (split-pane)                       |
+| `Enter`           | Show test/group output in content pane               |
 | `←` `→`           | Collapse/expand tree node                            |
 | `Ctrl+←` `Ctrl+→` | Switch keyboard focus between tree and content panes |
+| `Ctrl+P`          | Toggle show/hide passed tests in tree                |
+| `Ctrl+X`          | Toggle show/hide failed tests in tree                |
+| `/`               | Search within content pane (when focused)            |
+| `n` / `N`         | Jump to next / previous search match                 |
+| `Ctrl+W`          | Save current pane content to `.log` file             |
 | Mouse scroll      | Scrolls whichever pane the cursor is over            |
+| `Escape`          | Clear search / close tree                            |
 | `Ctrl+C`          | Exit                                                 |
+
+The tree panel shows the full test hierarchy (session > packages > modules > classes > tests)
+with live outcome markers (`✓` passed, `✗` failed, `E` error, `s` skipped, `x` xfail, `X` xpass).
+Groups show aggregated status. Type in the tree panel to fuzzy-filter tests (fzf-style).
 
 ## Tested versions
 

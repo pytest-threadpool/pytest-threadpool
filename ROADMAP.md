@@ -89,46 +89,52 @@ break it silently.
 parallel test execution — overall progress, global-scope output, and
 switchable per-thread or per-test output frames.
 
-**Problem:** In TTY mode, worker `print()` output is buffered and only
-surfaces on failure or when the user passes `-vs` to disable capture.
-Users cannot see output from running tests in real time, and there is
-no way to inspect individual worker activity during execution.
+**Current state: implemented** (`--threadpool-output=live`)
 
-**Current state:** The per-worker buffer infrastructure is in place
-(`_ThreadLocalStream` captures per-item, `captured_output` stores it,
-`pytest_threadpool_report` hook allows plugins to consume it).
-Shared-scope fixture output (session/package/module/class) is properly
-scoped and emitted at the suite level. The live reporter already tracks
-per-file/per-item state with ANSI cursor movement.
+The live-view terminal UI provides:
 
-**Design:**
+- **Split-pane layout:** Tree panel on the left, content on the right.
+  Toggle with `Tab`. Tree width configurable via `threadpool_tree_width`
+  ini setting.
 
-- **Top area — overall progress:** Compact status showing total
-  progress, pass/fail counts, and elapsed time. Always visible
-  regardless of which frame is selected.
+- **Test tree:** Full session hierarchy (packages > modules > classes >
+  tests) with live outcome markers (`✓`/`✗`/`E`/`s`/`x`/`X`).
+  Groups show aggregated status. Fuzzy search (fzf-style) with
+  incremental filtering. `Ctrl+P`/`Ctrl+X` toggle passed/failed
+  visibility.
 
-- **Global frame (default):** Shows global-scope output in real time —
-  session/package/module/class fixture setup and teardown, collection
-  messages, and warnings. This is the default view when no specific
-  thread or test is focused.
+- **Context switching:** `Enter` on a test shows its captured output
+  (stdout, stderr, logs, colored tracebacks) in the content pane.
+  `Enter` on a group shows combined output for all descendants.
+  `Summary` node returns to the main progress view.
 
-- **Per-thread frames:** Switch focus to a specific worker thread to
-  stream its buffered output live. Unfocused workers continue buffering
-  silently, indicated by status dots or spinners in the progress area.
+- **Content search:** `/` activates vim-style search within the content
+  pane. `n`/`N` navigate matches. Current match highlighted in orange,
+  other matches in grey.
 
-- **Per-test frames:** Switch focus to a specific test to see its
-  setup, call, and teardown output. Completed tests show their full
-  captured output; running tests stream live.
+- **Save to file:** `Ctrl+S` dumps the full active buffer (ANSI-stripped)
+  to a timestamped `.log` file.
 
-- **Frame switching:** Keyboard shortcuts or arrow keys to cycle between
-  global, per-thread, and per-test views. Similar to
-  `docker compose logs --follow` with service selection.
+- **Independent scroll:** Mouse scroll targets whichever pane the cursor
+  is over. `Ctrl+←`/`Ctrl+→` switches keyboard focus between panes.
 
-**Control:** `--threadpool-output=live|buffered` flag for explicit
-selection. Default: `live` when stdout is a TTY, `buffered` otherwise.
+- **Region-based rendering:** Dirty tracking per region (`Region` enum)
+  prevents cross-pane flicker during concurrent updates.
 
-**Priority:** Medium — currently users need `-vs` to see output, which
-is a clear workaround but a friction point for adoption.
+**Remaining work:**
+
+- **Per-thread live streaming:** Currently per-test output is populated
+  after each test completes. Streaming live output from running tests
+  would require bridging `_ThreadLocalStream` to the view manager in
+  real time.
+
+- **Progress bar:** Compact top-area progress showing pass/fail counts,
+  elapsed time, and ETA.
+
+- **Screen resize handling:** `SIGWINCH` support for dynamic terminal
+  resize.
+
+**Priority:** Low — core functionality is complete.
 
 ## Plugin compatibility testing
 
