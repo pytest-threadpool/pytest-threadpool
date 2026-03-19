@@ -34,7 +34,7 @@ class TestSimple:
 """
 
 
-def _run_live_pty(ftdir, *, wait_for="Ctrl+C", send_sigint=True):
+def _run_live_pty(ftdir, *, wait_for="tests complete", send_sigint=True):
     """Run pytest with --threadpool-output=live in a PTY.
 
     Reads output until ``wait_for`` appears, optionally sends SIGINT,
@@ -242,7 +242,7 @@ class TestWidthTruncation:
         """In live/TTY mode with narrow terminal, lines are truncated."""
         ftdir.makepyfile(MANY_TESTS)
         # Live mode blocks on Ctrl+C, so use the PTY helper that sends SIGINT.
-        raw, rc, _, _ = _run_live_pty(ftdir, wait_for="Ctrl+C", send_sigint=True)
+        raw, rc, _, _ = _run_live_pty(ftdir, wait_for="tests complete", send_sigint=True)
         assert rc == 0, f"Live mode exit code: {rc}\nstdout: {raw}"
         assert "test_file.py" in raw, f"Missing test file in output:\n{raw}"
 
@@ -336,9 +336,9 @@ class TestLiveViewScrollResponsiveness:
                         combined += data
                     except OSError:
                         break
-                    if b"Ctrl+C" in combined:
+                    if b"tests complete" in combined:
                         break
-            assert b"Ctrl+C" in combined, (
+            assert b"tests complete" in combined, (
                 f"Never saw Ctrl+C prompt.\nOutput ({len(combined)} bytes): {combined[-500:]!r}"
             )
 
@@ -441,9 +441,9 @@ class TestLiveViewScrollResponsiveness:
                         combined += data
                     except OSError:
                         break
-                    if b"Ctrl+C" in combined:
+                    if b"tests complete" in combined:
                         break
-            assert b"Ctrl+C" in combined, "Never saw Ctrl+C prompt"
+            assert b"tests complete" in combined, "Never saw Ctrl+C prompt"
 
             _read_pty(master_fd, timeout=0.3)
 

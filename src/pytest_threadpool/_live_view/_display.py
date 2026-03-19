@@ -152,6 +152,7 @@ class Display:
         *,
         scroll_offset: int | None = None,
         status_text: str | None = None,
+        hint_text: str | None = None,
     ) -> None:
         """Render a ScreenBuffer viewport with dirty tracking.
 
@@ -159,8 +160,9 @@ class Display:
         the bottom visible.  Pass an explicit offset to override.
 
         When *status_text* is provided it is rendered on the last terminal
-        row with reverse-video styling, and the content viewport is reduced
-        by one row.
+        row with reverse-video styling.  When *hint_text* is also provided
+        it is rendered on the row above the status line with dim styling.
+        The content viewport is reduced accordingly.
         """
         if not self._in_alt:
             return
@@ -168,8 +170,9 @@ class Display:
         with self._lock:
             lines = buffer.snapshot()
             total = len(lines)
-            # Reserve the last row for the status line when present.
-            vp = self._height - 1 if status_text is not None else self._height
+            # Reserve bottom rows for hint + status lines.
+            reserved = (1 if status_text is not None else 0) + (1 if hint_text is not None else 0)
+            vp = self._height - reserved
 
             if scroll_offset is not None:
                 max_off = max(0, total - vp)
@@ -200,9 +203,9 @@ class Display:
                 parts.append(" " * (self._width - 1))
                 self._rendered[screen_row] = empty_key
 
-            # Status line on the last terminal row (reverse video).
+            # Status line above the hint line (reverse video).
             if status_text is not None:
-                status_row = self._height  # last row (1-based)
+                status_row = vp + 1  # 1-based, first reserved row
                 rendered = f"\033[7m{pad_line(status_text, self._width - 1)}\033[0m"
                 status_key = (-1, status_text)
                 if self._rendered.get(status_row) != status_key:
@@ -210,9 +213,41 @@ class Display:
                     parts.append(rendered)
                     self._rendered[status_row] = status_key
 
+            # Hint line on the very last terminal row (dim).
+            if hint_text is not None:
+                hint_row = self._height  # last row (1-based)
+                rendered_hint = f"\033[2m{pad_line(hint_text, self._width - 1)}\033[0m"
+                hint_key = (-2, hint_text)
+                if self._rendered.get(hint_row) != hint_key:
+                    parts.append(move_to(hint_row, 1))
+                    parts.append(rendered_hint)
+                    self._rendered[hint_row] = hint_key
+
             if parts:
                 self._file.write("".join(parts))
                 self._file.flush()
+
+    def redraw_lines(self, lines: list[str]) -> None:
+        """Write pre-formatted lines to fill the entire screen.
+
+        Used for modal overlays that replace the normal buffer content.
+        Invalidates the dirty cache so the next ``redraw_buffer`` call
+        repaints everything.
+        """
+        if not self._in_alt:
+            return
+        with self._lock:
+            parts: list[str] = []
+            for i, line in enumerate(lines[: self._height]):
+                parts.append(move_to(i + 1, 1))
+                parts.append(pad_line(line, self._width - 1))
+            for i in range(len(lines), self._height):
+                parts.append(move_to(i + 1, 1))
+                parts.append(" " * (self._width - 1))
+            if parts:
+                self._file.write("".join(parts))
+                self._file.flush()
+            self._rendered.clear()
 
     def dump_lines(self, lines: list[str]) -> None:
         """Print lines with colors to the file (after leaving alt screen)."""

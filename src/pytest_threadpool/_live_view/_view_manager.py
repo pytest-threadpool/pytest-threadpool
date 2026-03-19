@@ -50,6 +50,7 @@ class ViewManager:
         self._root_field = Field("root")
         self._active_field: Field = self._root_field
         self._status_line = StatusLine(Position.BOTTOM)
+        self._hint_text = "  \u2191\u2193 scroll   PgUp/PgDn page   Home/End   Ctrl+C exit"
         self._cursor = Cursor()
         self._layout = LayoutManager()
         self._scroll_column = ScrollColumn()
@@ -104,7 +105,9 @@ class ViewManager:
         self._header_lines += 1
         self._dirty.set()
         self._display.redraw_buffer(
-            self._compat_buffer, status_text=self._status_line.text or None
+            self._compat_buffer,
+            status_text=self._status_line.text or None,
+            hint_text=self._hint_text or None,
         )
 
     def add_content(self, text: str) -> None:
@@ -139,14 +142,18 @@ class ViewManager:
             self._compat_buffer,
             scroll_offset=self._user_scroll,
             status_text=self._status_line.text or None,
+            hint_text=self._hint_text or None,
         )
 
     @property
     def _viewport_height(self) -> int:
-        """Content viewport height, accounting for status line."""
+        """Content viewport height, accounting for status and hint lines."""
+        reserved = 0
         if self._status_line.text:
-            return self._height - 1
-        return self._height
+            reserved += 1
+        if self._hint_text:
+            reserved += 1
+        return self._height - reserved
 
     def _process_input(self) -> bool:
         """Drain all queued input events, batch scroll delta.
@@ -296,6 +303,7 @@ class ViewManager:
                     self._compat_buffer,
                     scroll_offset=self._user_scroll,
                     status_text=self._status_line.text or None,
+                    hint_text=self._hint_text or None,
                 )
 
     def _stop_refresh_loop(self) -> None:
