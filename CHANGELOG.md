@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.4.0
+
+### Highlights
+
+- **Interactive live-view terminal UI** (`--threadpool-output live`) with
+  split-pane layout, test tree navigation, and real-time output inspection.
+
+### Live-view features
+
+- **Split-pane layout**: `Tab` opens a tree panel on the left with the main
+  content on the right, both independently scrollable.
+- **Test tree**: Full session hierarchy (packages > modules > classes > tests)
+  with live outcome markers (`✓` passed, `✗` failed, `E` error, `s` skipped,
+  `x` xfail, `X` xpass). Groups show aggregated status.
+- **Fuzzy search**: Type in the tree panel to fuzzy-filter tests (fzf-style
+  subsequence matching). `Escape` clears the query.
+- **Context switching**: `Enter` on a test shows its captured output (stdout,
+  stderr, logs, colored tracebacks) in the content pane. `Enter` on a group
+  shows combined output for all descendants. `Summary` node returns to the
+  main progress view.
+- **Outcome filters**: `Ctrl+P` toggles passed test visibility, `Ctrl+X`
+  toggles failed test visibility. Empty groups are automatically hidden.
+- **Content search**: `/` activates vim-style search within the content pane.
+  `n`/`N` navigate matches. Current match highlighted in orange, other matches
+  in grey. `Escape` clears search.
+- **Save to file**: `Ctrl+W` saves the full active buffer (ANSI-stripped) to
+  `logs/{name}_{timestamp}.log`.
+- **Focus switching**: `Ctrl+←`/`Ctrl+→` switches keyboard focus between panes.
+  Mouse scroll targets whichever pane the cursor is over.
+- **Keybinds hint line**: Bottom bar shows available keyboard shortcuts.
+- **Configurable tree width**: `threadpool_tree_width` ini setting (supports
+  `pyproject.toml`, `pytest.ini`).
+
+### Test outcome markers
+
+- Added `x` (xfail), `X` (xpass), and `E` (setup/teardown error) markers
+  to the live reporter alongside existing `.` (pass), `F` (fail), `s` (skip).
+- Sequential nodeid-style output now shows `XFAIL`, `XPASS`, and `ERROR` words.
+
+### Scroll responsiveness
+
+- Fixed scroll input being unresponsive after tests finish — root cause was
+  multiple competing `InputReader` threads stealing from the shared terminal
+  input buffer on free-threaded Python.
+- `InputReader` now uses `os.dup()` to create a private fd immune to pytest
+  capture redirections.
+- Device-level singleton ensures only one active reader per terminal device.
+- `ensure_entered()` uses `threading.Event` + lock for thread-safe
+  initialization on free-threaded Python.
+- `ensure_cbreak()` uses `TCSANOW` to avoid flushing pending input.
+
+### Architecture
+
+- Region-based dirty tracking (`Region` enum) for independent pane rendering
+  without cross-pane flicker.
+- `Display.redraw_buffer()` supports `left_offset` for split-pane rendering,
+  `highlight`/`highlight_line` for search result visualization.
+- `Display.redraw_pane()` and `redraw_separator()` for side panel rendering.
+
+### Tests
+
+- Integration tests for all test outcome markers (pass, fail, skip, xfail,
+  xpass, error) in both classic and live modes.
+- Integration test for tree panel rendering.
+- Unit tests for tree overlay (navigation, fuzzy search, outcome filters,
+  group markers, expand/collapse).
+- Unit tests for content search highlighting.
+- Unit tests for scroll latency.
+
 ## 0.3.6
 
 ### Fixes
