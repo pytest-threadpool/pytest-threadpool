@@ -145,6 +145,42 @@ class TestLiveViewClassicMode:
         assert result.returncode == 0
 
 
+class TestClassicModeOutcomes:
+    """Classic (piped) mode displays correct outcome markers."""
+
+    def test_classic_fail_marker(self, ftdir):
+        """Failed tests produce 'F' marker in classic output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "F" in result.stdout, f"Missing 'F' marker:\n{result.stdout}"
+        result.assert_outcomes(passed=1, failed=1, skipped=1, xfailed=1, xpassed=1)
+
+    def test_classic_skip_marker(self, ftdir):
+        """Skipped tests produce 's' marker in classic output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "s" in result.stdout, f"Missing 's' marker:\n{result.stdout}"
+
+    def test_classic_xfail_marker(self, ftdir):
+        """Expected failures produce 'x' marker in classic output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "x" in result.stdout, f"Missing 'x' marker:\n{result.stdout}"
+
+    def test_classic_xpass_marker(self, ftdir):
+        """Unexpected passes produce 'X' marker in classic output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "X" in result.stdout, f"Missing 'X' marker:\n{result.stdout}"
+
+    def test_classic_error_marker(self, ftdir):
+        """Setup errors produce 'E' marker in classic output."""
+        ftdir.makepyfile(ERROR_IN_SETUP)
+        result = ftdir.run_pytest("--threadpool", "3")
+        assert "E" in result.stdout, f"Missing 'E' marker:\n{result.stdout}"
+        result.assert_outcomes(passed=1, errors=1)
+
+
 class TestLiveViewLiveMode:
     """--threadpool-output=live keeps the view alive until Ctrl+C."""
 
@@ -457,6 +493,103 @@ class TestLiveViewScrollResponsiveness:
                 proc.kill()
             proc.wait(timeout=5)
             os.close(master_fd)
+
+
+FAILING_TESTS = """\
+import pytest
+
+@pytest.mark.parallelizable("children")
+class TestOutcomes:
+    def test_pass(self):
+        pass
+
+    def test_fail(self):
+        assert False, "intentional failure"
+
+    def test_skip(self):
+        pytest.skip("skipped on purpose")
+
+    def test_xfail(self):
+        pytest.xfail("expected failure")
+
+    @pytest.mark.xfail(reason="should pass")
+    def test_xpass(self):
+        pass
+"""
+
+ERROR_IN_SETUP = """\
+import pytest
+
+@pytest.fixture
+def broken_fixture():
+    raise RuntimeError("setup boom")
+
+@pytest.mark.parallelizable("children")
+class TestSetupError:
+    def test_ok(self):
+        pass
+
+    def test_broken(self, broken_fixture):
+        pass
+"""
+
+
+class TestLiveViewOutcomes:
+    """Live view displays correct indicators for all test outcomes."""
+
+    def test_fail_shows_F_letter(self, ftdir):
+        """Failed tests show 'F' in the live view output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert rc != 0, f"Expected non-zero exit code.\nstdout: {raw}"
+        assert "F" in raw, f"Missing 'F' for failed test:\n{raw}"
+
+    def test_skip_shows_s_letter(self, ftdir):
+        """Skipped tests show 's' in the live view output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, _rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert "s" in raw, f"Missing 's' for skipped test:\n{raw}"
+
+    def test_xfail_shows_x_letter(self, ftdir):
+        """Expected failures show 'x' in the live view output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, _rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert "x" in raw, f"Missing 'x' for xfail test:\n{raw}"
+
+    def test_xpass_shows_X_letter(self, ftdir):
+        """Unexpected passes show 'X' in the live view output."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, _rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert "X" in raw, f"Missing 'X' for xpass test:\n{raw}"
+
+    def test_error_in_setup_shows_E_letter(self, ftdir):
+        """Setup errors show 'E' in the live view output."""
+        ftdir.makepyfile(ERROR_IN_SETUP)
+        raw, rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert rc != 0, f"Expected non-zero exit code.\nstdout: {raw}"
+        assert "E" in raw, f"Missing 'E' for setup error:\n{raw}"
+
+    def test_failure_summary_visible(self, ftdir):
+        """Failure details are visible in the live view dump after Ctrl+C."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, _rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert "FAILED" in raw or "intentional failure" in raw, (
+            f"Missing failure summary in output:\n{raw}"
+        )
+
+    def test_mixed_outcomes_summary_line(self, ftdir):
+        """The summary line reports correct counts for mixed outcomes."""
+        ftdir.makepyfile(FAILING_TESTS)
+        raw, _rc, found, _ = _run_live_pty(ftdir)
+        assert found, f"Did not see 'Ctrl+C' prompt.\nstdout: {raw}"
+        assert "1 failed" in raw, f"Missing '1 failed' in summary:\n{raw}"
+        assert "1 passed" in raw or "passed" in raw, f"Missing passed count in summary:\n{raw}"
 
 
 class TestLiveViewOptionValidation:

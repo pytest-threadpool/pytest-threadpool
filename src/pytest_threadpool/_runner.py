@@ -557,9 +557,16 @@ class _LiveReporter:
 
     @staticmethod
     def _letter_for(report):
+        if hasattr(report, "wasxfail"):
+            if report.skipped:
+                return "x"
+            if report.passed:
+                return "X"
         if report.passed:
             return "."
         if report.failed:
+            if getattr(report, "when", "call") != "call":
+                return "E"
             return "F"
         if report.skipped:
             return "s"
@@ -568,11 +575,16 @@ class _LiveReporter:
     def _color_for(self, report):
         if not self._tw or not self._tw.hasmarkup:
             return ""
+        if hasattr(report, "wasxfail"):
+            if report.skipped:
+                return _YELLOW
+            if report.passed:
+                return _RED_BOLD
         if report.passed:
             return _GREEN
-        if report.failed:  # pragma: no cover -- integration tests only produce passing reports
+        if report.failed:
             return _RED_BOLD
-        if report.skipped:  # pragma: no cover -- skip reports don't reach _color_for path
+        if report.skipped:
             return _YELLOW
         return ""  # pragma: no cover -- unknown report status fallback
 
@@ -722,11 +734,18 @@ class ParallelRunner:
         if f:
             report = call_rep if call_rep is not None else rep_setup
             markup = tw and tw.hasmarkup
-            if report.passed:
+            if hasattr(report, "wasxfail"):
+                if report.skipped:
+                    word = "XFAIL"
+                    color = _YELLOW if markup else ""
+                else:
+                    word = "XPASS"
+                    color = _RED_BOLD if markup else ""
+            elif report.passed:
                 word = "PASSED"
                 color = _GREEN if markup else ""
             elif report.failed:
-                word = "FAILED"
+                word = "ERROR" if getattr(report, "when", "call") != "call" else "FAILED"
                 color = _RED_BOLD if markup else ""
             elif report.skipped:
                 word = "SKIPPED"
