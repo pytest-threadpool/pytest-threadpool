@@ -13,7 +13,8 @@ from pytest_threadpool._live_view._input import InputReader, KeyEvent, MouseEven
 from pytest_threadpool._live_view._layout import LayoutManager, Rect
 from pytest_threadpool._live_view._scroll_column import ScrollColumn
 from pytest_threadpool._live_view._status_line import Position, StatusLine
-from pytest_threadpool._live_view._view_manager import ViewManager
+from pytest_threadpool._live_view._tree_overlay import ItemTree, TreeOverlay
+from pytest_threadpool._live_view._view_manager import Region, ViewManager
 
 __all__ = [
     "Cursor",
@@ -21,15 +22,18 @@ __all__ = [
     "Display",
     "Field",
     "InputReader",
+    "ItemTree",
     "KeyEvent",
     "LayoutManager",
     "MouseEvent",
     "Position",
     "Rect",
+    "Region",
     "ScreenBuffer",
     "ScrollColumn",
     "SplitDirection",
     "StatusLine",
+    "TreeOverlay",
     "ViewManager",
     "_visible_len",
     "parse_events",

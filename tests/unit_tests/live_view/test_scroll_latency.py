@@ -27,6 +27,7 @@ from pytest_threadpool._live_view._input import (
     KeyEvent,
     MouseEvent,
 )
+from pytest_threadpool._live_view._view_manager import Region
 
 # Realistic session output (abbreviated to ~50 lines matching user's report).
 _SESSION_LINES = [
@@ -152,12 +153,12 @@ def _setup_post_test_vm(
         vm._header_lines += 1
 
     # Wire up async input reader BEFORE starting refresh loop.
-    reader = AsyncInputReader(notify=vm._dirty)
+    reader = AsyncInputReader(notify=vm._dirty_wake)
     vm._input_reader = reader
 
     # Enter post-test state.
     vm._status_line.set_text("tests complete \u2014 press Ctrl+C to exit")
-    vm._dirty.set()
+    vm._mark_dirty(Region.CONTENT)
 
     # Start only the refresh loop (not the input reader).
     vm._start_refresh_loop()
@@ -293,11 +294,11 @@ def _setup_pipe_vm(width: int = 200, height: int = 24) -> tuple[WriteTracker, Vi
 
     # Wire up a real InputReader on a pipe fd.
     read_fd, write_fd = os.pipe()
-    vm._input_reader = InputReader(read_fd, notify=vm._dirty)
+    vm._input_reader = InputReader(read_fd, notify=vm._dirty_wake)
     vm._input_reader.start()
 
     vm._status_line.set_text("tests complete \u2014 press Ctrl+C to exit")
-    vm._dirty.set()
+    vm._mark_dirty(Region.CONTENT)
 
     vm._start_refresh_loop()
     time.sleep(0.05)
@@ -412,12 +413,12 @@ def _setup_pty_vm(width: int = 120, height: int = 24) -> tuple[int, ViewManager,
     _drain_master(master_fd)
 
     # Wire up InputReader on the slave fd (reads from the pty).
-    vm._input_reader = InputReader(slave_fd, notify=vm._dirty)
+    vm._input_reader = InputReader(slave_fd, notify=vm._dirty_wake)
     vm._input_reader.start()
 
     # Enter post-test state.
     vm._status_line.set_text("tests complete \u2014 press Ctrl+C to exit")
-    vm._dirty.set()
+    vm._mark_dirty(Region.CONTENT)
 
     vm._start_refresh_loop()
     time.sleep(0.05)
@@ -513,7 +514,7 @@ class TestScrollLatencyPty:
             ]
             for line in summary_lines:
                 vm.add_content(line)
-            vm._dirty.set()
+            vm._mark_dirty(Region.CONTENT)
             time.sleep(0.05)
             _drain_master(master_fd)
 

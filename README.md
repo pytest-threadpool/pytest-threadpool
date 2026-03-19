@@ -160,16 +160,69 @@ pytest
 To enable `--threadpool` by default, add it to your config:
 
 **pyproject.toml** (pytest 9.0+):
+
 ```toml
 [tool.pytest]
 addopts = ["--threadpool", "auto"]
 ```
 
 **pytest.ini**:
+
 ```ini
 [pytest]
 addopts = --threadpool auto
 ```
+
+## Configuration
+
+### Command-line options
+
+| Option                | Values            | Default   | Description                                                                                                   |
+|-----------------------|-------------------|-----------|---------------------------------------------------------------------------------------------------------------|
+| `--threadpool`        | `N` or `auto`     | *(off)*   | Enable parallel execution with N threads. `auto` uses `os.cpu_count()`.                                       |
+| `--threadpool-output` | `classic`, `live` | `classic` | Output mode. `live` opens an interactive terminal viewer with scroll, tree navigation, and real-time updates. |
+
+### INI settings
+
+Set in `pyproject.toml`, `pytest.ini`, or `setup.cfg`:
+
+| Setting                 | Type | Default | Description                                                                     |
+|-------------------------|------|---------|---------------------------------------------------------------------------------|
+| `threadpool_tree_width` | int  | `0`     | Width (columns) of the live-view tree pane. `0` = auto (1/4 of terminal width). |
+
+**pyproject.toml:**
+
+```toml
+[tool.pytest]
+threadpool_tree_width = 35
+
+# or under ini_options
+[tool.pytest.ini_options]
+threadpool_tree_width = 35
+```
+
+**pytest.ini:**
+
+```ini
+[pytest]
+threadpool_tree_width = 35
+```
+
+### Live-view keybindings
+
+Available when `--threadpool-output live` is active:
+
+| Key               | Action                                               |
+|-------------------|------------------------------------------------------|
+| `↑` `↓`           | Scroll content / move tree cursor                    |
+| `PgUp` `PgDn`     | Page scroll                                          |
+| `Home` `End`      | Jump to top / bottom                                 |
+| `Tab`             | Toggle tree panel                                    |
+| `Enter`           | Expand/collapse tree node, or select                 |
+| `←` `→`           | Collapse/expand tree node                            |
+| `Ctrl+←` `Ctrl+→` | Switch keyboard focus between tree and content panes |
+| Mouse scroll      | Scrolls whichever pane the cursor is over            |
+| `Ctrl+C`          | Exit                                                 |
 
 ## Tested versions
 

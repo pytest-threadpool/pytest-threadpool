@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import enum
 import os
 import signal
 import threading
@@ -17,6 +18,7 @@ from pytest_threadpool._live_view._input import InputReader, KeyEvent, MouseEven
 from pytest_threadpool._live_view._layout import LayoutManager
 from pytest_threadpool._live_view._scroll_column import ScrollColumn
 from pytest_threadpool._live_view._status_line import Position, StatusLine
+from pytest_threadpool._live_view._tree_overlay import ItemTree, TreeOverlay
 
 if TYPE_CHECKING:
     from typing import IO
@@ -25,6 +27,13 @@ if TYPE_CHECKING:
 _SCROLL_LINES = 3
 # Target refresh rate for the background refresh thread.
 _REFRESH_INTERVAL = 1.0 / 30  # ~30 fps
+
+
+class Region(enum.StrEnum):
+    """Identifiers for independently-redrawable screen regions."""
+
+    CONTENT = "content"
+    OVERLAY = "overlay"
 
 
 class ViewManager:
@@ -50,7 +59,10 @@ class ViewManager:
         self._root_field = Field("root")
         self._active_field: Field = self._root_field
         self._status_line = StatusLine(Position.BOTTOM)
-        self._hint_text = "  \u2191\u2193 scroll   PgUp/PgDn page   Home/End   Ctrl+C exit"
+        self._hint_text = (
+            "  \u2191\u2193 scroll   PgUp/PgDn page   Home/End"
+            "   Tab tree   Ctrl+\u2190\u2192 focus   Ctrl+C exit"
+        )
         self._cursor = Cursor()
         self._layout = LayoutManager()
         self._scroll_column = ScrollColumn()
@@ -63,11 +75,55 @@ class ViewManager:
         self._header_lines = 0
         # User scroll offset (None = auto-scroll to bottom).
         self._user_scroll: int | None = None
+        # Which pane owns keyboard input when split-pane is active.
+        self._keyboard_focus: Region = Region.OVERLAY
         self._input_reader: InputReader | None = None
         self._refresh_thread: threading.Thread | None = None
         self._refresh_stop = threading.Event()
-        # Set when the display needs a repaint (content or scroll changed).
-        self._dirty = threading.Event()
+        # Region-based dirty tracking.  Any number of regions can be
+        # registered by name (e.g. "content", "overlay", "tree",
+        # "search").  ``_dirty_wake`` wakes the refresh loop;
+        # ``_dirty_regions`` tracks which regions need redrawing.
+        self._dirty_wake = threading.Event()
+        self._dirty_regions: set[Region] = set()
+        self._dirty_lock = threading.Lock()
+        # Tree overlay (None when not shown).
+        self._overlay: TreeOverlay | None = None
+        self._test_tree: ItemTree | None = None
+        # Configurable tree pane width (columns).  0 = auto (1/4 of width).
+        self._tree_width_cfg: int = 0
+
+    # --- Dirty-region helpers ---
+
+    def _mark_dirty(self, *regions: Region) -> None:
+        """Mark one or more regions as needing redraw."""
+        with self._dirty_lock:
+            self._dirty_regions.update(regions)
+        self._dirty_wake.set()
+
+    def _consume_dirty(self) -> set[Region]:
+        """Return the set of dirty regions and clear them."""
+        with self._dirty_lock:
+            result = self._dirty_regions.copy()
+            self._dirty_regions.clear()
+        return result
+
+    # --- Test tree ---
+
+    def add_test_items(self, nodeids: list[str]) -> None:
+        """Add test item nodeids to the tree.
+
+        Called per parallel group.  New nodeids are inserted into
+        the existing tree; duplicates are ignored.
+        """
+        if self._test_tree is None:
+            self._test_tree = ItemTree(nodeids)
+        else:
+            for nid in nodeids:
+                self._test_tree._build([nid])
+        if self._overlay is not None:
+            self._overlay._rebuild()
+            self._mark_dirty(Region.OVERLAY)
 
     # --- Backward-compatible API (used by _runner.py) ---
 
@@ -103,7 +159,7 @@ class ViewManager:
         row = self._compat_buffer.add_lines(1)
         self._compat_buffer.set_line(row, text)
         self._header_lines += 1
-        self._dirty.set()
+        self._mark_dirty(Region.CONTENT)
         self._display.redraw_buffer(
             self._compat_buffer,
             status_text=self._status_line.text or None,
@@ -119,7 +175,7 @@ class ViewManager:
         self.ensure_entered()
         row = self._compat_buffer.add_lines(1)
         self._compat_buffer.set_line(row, text)
-        self._dirty.set()
+        self._mark_dirty(Region.CONTENT)
 
     def allocate_lines(self, n: int) -> int:
         """Reserve *n* rows in the compat buffer."""
@@ -129,15 +185,18 @@ class ViewManager:
     def set_line(self, row: int, content: str) -> None:
         """Update a compat buffer row."""
         self._compat_buffer.set_line(row, content)
-        self._dirty.set()
+        self._mark_dirty(Region.CONTENT)
 
     def redraw(self) -> None:
         """Redraw the visible viewport immediately.
 
-        Called by the runner thread when content changes.  Respects the
-        current user scroll offset.  Input processing is handled by the
-        background refresh thread (~30 fps) independently.
+        Called by the runner thread when content changes.  When the
+        tree overlay is active, marks content dirty so the refresh
+        loop renders it in the right pane.
         """
+        if self._overlay is not None:
+            self._mark_dirty(Region.CONTENT)
+            return
         self._display.redraw_buffer(
             self._compat_buffer,
             scroll_offset=self._user_scroll,
@@ -155,11 +214,25 @@ class ViewManager:
             reserved += 1
         return self._height - reserved
 
-    def _process_input(self) -> bool:
-        """Drain all queued input events, batch scroll delta.
+    @property
+    def _tree_pane_width(self) -> int:
+        """Width of the tree pane (0 when overlay is closed)."""
+        if self._overlay is None or self._width < 80:
+            return 0
+        if self._tree_width_cfg > 0:
+            return min(self._tree_width_cfg, self._width // 2)
+        return max(25, self._width // 4)
 
-        Returns ``True`` if any scroll-affecting events were processed.
-        Does NOT call redraw — the caller is responsible for that.
+    def _process_input(self) -> bool:
+        """Drain all queued input events and route them.
+
+        In split-pane mode:
+        - Mouse scroll goes to whichever pane the cursor is over.
+        - Keyboard events go to the focused pane (``_keyboard_focus``).
+        - ``Ctrl+Left`` / ``Ctrl+Right`` switches keyboard focus.
+        - ``Tab`` toggles the tree overlay on/off.
+
+        Returns ``True`` if any events were processed.
         """
         if self._input_reader is None:
             return False
@@ -167,55 +240,116 @@ class ViewManager:
         if not events:
             return False
 
+        tree_w = self._tree_pane_width
+        overlay_changed = False
+        content_changed = False
+
+        for event in events:
+            # --- Tab: toggle overlay ---
+            if isinstance(event, KeyEvent) and event.key == "Tab":
+                if self._overlay is not None:
+                    self._overlay = None
+                    self._display._rendered.clear()
+                    self._mark_dirty(Region.CONTENT)
+                    return True
+                if self._test_tree is not None:
+                    pw = tree_w if tree_w > 0 else None
+                    self._overlay = TreeOverlay(
+                        self._test_tree,
+                        self._width,
+                        self._height,
+                        pane_width=pw,
+                    )
+                    self._keyboard_focus = Region.OVERLAY
+                    self._display._rendered.clear()
+                    self._mark_dirty(Region.OVERLAY, Region.CONTENT)
+                    return True
+                continue
+
+            # --- Focus switching: Ctrl+Left / Ctrl+Right ---
+            if (
+                isinstance(event, KeyEvent)
+                and self._overlay is not None
+                and event.key in ("Ctrl+Left", "Ctrl+Right")
+            ):
+                if event.key == "Ctrl+Left":
+                    self._keyboard_focus = Region.OVERLAY
+                else:
+                    self._keyboard_focus = Region.CONTENT
+                continue
+
+            # --- Mouse scroll: route by column position ---
+            if isinstance(event, MouseEvent) and event.button in (64, 65):
+                mouse_delta = -_SCROLL_LINES if event.button == 64 else _SCROLL_LINES
+                if self._overlay is not None and tree_w > 0 and event.col < tree_w:
+                    self._overlay.scroll(mouse_delta)
+                    overlay_changed = True
+                else:
+                    content_changed = self._apply_content_scroll(delta=mouse_delta)
+                continue
+
+            # --- Keyboard events ---
+            if isinstance(event, KeyEvent):
+                if self._overlay is not None and self._keyboard_focus == Region.OVERLAY:
+                    result = self._overlay.handle_key(event.key)
+                    if result == "close":
+                        self._overlay = None
+                        self._display._rendered.clear()
+                        self._mark_dirty(Region.CONTENT)
+                        return True
+                    if result is not None and result.startswith("jump:"):
+                        self._overlay = None
+                        self._display._rendered.clear()
+                        self._mark_dirty(Region.CONTENT)
+                        return True
+                    overlay_changed = True
+                else:
+                    content_changed = self._apply_content_key(event.key) or content_changed
+
+        if overlay_changed:
+            self._mark_dirty(Region.OVERLAY)
+        if content_changed:
+            self._mark_dirty(Region.CONTENT)
+        return overlay_changed or content_changed
+
+    def _apply_content_scroll(self, *, delta: int) -> bool:
+        """Apply a scroll delta to the content pane. Returns True if changed."""
         total = self._compat_buffer.nlines
         vp = self._viewport_height
         if total <= vp:
             return False
-
-        delta = 0
-        snap_home = False
-        snap_end = False
-
-        for event in events:
-            if isinstance(event, MouseEvent):
-                if event.button == 64:  # scroll up
-                    delta -= _SCROLL_LINES
-                elif event.button == 65:  # scroll down
-                    delta += _SCROLL_LINES
-            elif isinstance(event, KeyEvent):
-                if event.key == "Up":
-                    delta -= 1
-                elif event.key == "Down":
-                    delta += 1
-                elif event.key == "PageUp":
-                    delta -= vp
-                elif event.key == "PageDown":
-                    delta += vp
-                elif event.key == "Home":
-                    snap_home = True
-                    snap_end = False
-                    delta = 0
-                elif event.key == "End":
-                    snap_end = True
-                    snap_home = False
-                    delta = 0
-
-        if snap_home:
-            self._user_scroll = 0
-        elif snap_end:
+        max_off = total - vp
+        if self._user_scroll is None:
+            self._user_scroll = max_off
+        self._user_scroll = max(0, min(self._user_scroll + delta, max_off))
+        if self._user_scroll >= max_off:
             self._user_scroll = None
-        elif delta != 0:
-            max_off = total - vp
-            if self._user_scroll is None:
-                self._user_scroll = max_off
-            self._user_scroll = max(0, min(self._user_scroll + delta, max_off))
-            if self._user_scroll >= max_off:
-                self._user_scroll = None
+        return True
+
+    def _apply_content_key(self, key: str) -> bool:
+        """Apply a keyboard event to the content pane. Returns True if changed."""
+        total = self._compat_buffer.nlines
+        vp = self._viewport_height
+        if total <= vp:
+            return False
+        delta = 0
+        if key == "Up":
+            delta = -1
+        elif key == "Down":
+            delta = 1
+        elif key == "PageUp":
+            delta = -vp
+        elif key == "PageDown":
+            delta = vp
+        elif key == "Home":
+            self._user_scroll = 0
+            return True
+        elif key == "End":
+            self._user_scroll = None
+            return True
         else:
             return False
-
-        self._dirty.set()
-        return True
+        return self._apply_content_scroll(delta=delta)
 
     def wait_and_leave(self) -> None:
         """Show status prompt, wait for Ctrl+C, then leave + dump.
@@ -243,7 +377,7 @@ class ViewManager:
         self._start_input_reader()
 
         self._status_line.set_text("tests complete \u2014 press Ctrl+C to exit")
-        self._dirty.set()
+        self._mark_dirty(Region.CONTENT)
 
         stop = threading.Event()
         prev_handler = signal.getsignal(signal.SIGINT)
@@ -278,16 +412,16 @@ class ViewManager:
     def _refresh_loop(self) -> None:
         """Background loop: process input + redraw at ~30 fps.
 
-        Wakes immediately when ``_dirty`` is set (by scroll input or
-        content changes), otherwise polls at the refresh interval.
-
-        Periodically re-asserts cbreak mode in case another component
-        (e.g. pytest's capture plugin cleanup) restored cooked mode.
+        Wakes when any region is marked dirty.  Only redraws the
+        regions that actually changed — overlay and content are
+        independent so background test updates don't cause the
+        overlay to flicker.
         """
-        cbreak_interval = 0.5  # re-assert cbreak every 500 ms
+        cbreak_interval = 0.5
         last_cbreak = 0.0
         while not self._refresh_stop.is_set():
-            self._dirty.wait(timeout=_REFRESH_INTERVAL)
+            self._dirty_wake.wait(timeout=_REFRESH_INTERVAL)
+            self._dirty_wake.clear()
             if self._refresh_stop.is_set():
                 break
 
@@ -297,8 +431,27 @@ class ViewManager:
                 last_cbreak = now
 
             self._process_input()
-            if self._dirty.is_set():
-                self._dirty.clear()
+            dirty = self._consume_dirty()
+            tree_w = self._tree_pane_width
+
+            if self._overlay is not None and tree_w > 0:
+                # Split-pane mode: tree on left, content on right.
+                if Region.OVERLAY in dirty:
+                    self._display.redraw_pane(self._overlay.render(), 0, tree_w)
+                    self._display.redraw_separator(tree_w)
+                if Region.CONTENT in dirty:
+                    self._display.redraw_buffer(
+                        self._compat_buffer,
+                        scroll_offset=self._user_scroll,
+                        status_text=self._status_line.text or None,
+                        hint_text=self._hint_text or None,
+                        left_offset=tree_w + 1,
+                    )
+            elif self._overlay is not None:
+                # Narrow terminal — full-screen overlay fallback.
+                if Region.OVERLAY in dirty:
+                    self._display.redraw_lines(self._overlay.render())
+            elif Region.CONTENT in dirty:
                 self._display.redraw_buffer(
                     self._compat_buffer,
                     scroll_offset=self._user_scroll,
@@ -309,7 +462,7 @@ class ViewManager:
     def _stop_refresh_loop(self) -> None:
         """Stop the background refresh thread."""
         self._refresh_stop.set()
-        self._dirty.set()  # Unblock _dirty.wait() so the thread exits promptly.
+        self._dirty_wake.set()  # Unblock wait() so the thread exits promptly.
         if self._refresh_thread is not None:
             self._refresh_thread.join(timeout=2)
             self._refresh_thread = None
@@ -323,7 +476,7 @@ class ViewManager:
         """
         fd = self._display._tty_fd
         if fd >= 0:
-            self._input_reader = InputReader(fd, notify=self._dirty)
+            self._input_reader = InputReader(fd, notify=self._dirty_wake)
             self._input_reader.start()
 
     def _stop_input_reader(self) -> None:

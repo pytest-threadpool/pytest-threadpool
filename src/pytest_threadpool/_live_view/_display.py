@@ -47,7 +47,7 @@ class Display:
         self._saved_termios: list | None = None
         self._tty_fd: int = -1
         # Dirty-tracking for redraw_buffer (backward-compat).
-        self._rendered: dict[int, tuple[int, str]] = {}
+        self._rendered: dict[int, tuple[object, ...]] = {}
         self._scroll_offset = 0
 
     def enter(self) -> None:
@@ -153,24 +153,30 @@ class Display:
         scroll_offset: int | None = None,
         status_text: str | None = None,
         hint_text: str | None = None,
+        left_offset: int = 0,
     ) -> None:
         """Render a ScreenBuffer viewport with dirty tracking.
 
         When *scroll_offset* is ``None`` (default), auto-scrolls to keep
         the bottom visible.  Pass an explicit offset to override.
 
-        When *status_text* is provided it is rendered on the last terminal
-        row with reverse-video styling.  When *hint_text* is also provided
-        it is rendered on the row above the status line with dim styling.
-        The content viewport is reduced accordingly.
+        *left_offset* shifts rendering to start at a given column
+        (0-based), reducing the available width.  Used for split-pane
+        layouts where a side panel occupies the left columns.
+
+        When *status_text* / *hint_text* are provided they are rendered
+        on the bottom rows (spanning the full terminal width regardless
+        of *left_offset*).
         """
         if not self._in_alt:
             return
 
         with self._lock:
+            col = left_offset + 1  # 1-based terminal column
+            content_width = self._width - left_offset - 1
+
             lines = buffer.snapshot()
             total = len(lines)
-            # Reserve bottom rows for hint + status lines.
             reserved = (1 if status_text is not None else 0) + (1 if hint_text is not None else 0)
             vp = self._height - reserved
 
@@ -188,44 +194,71 @@ class Display:
             for screen_row in range(rows_to_show):
                 buf_row = self._scroll_offset + screen_row
                 content = lines[buf_row]
-                cache_key = (self._scroll_offset, content)
+                cache_key = (self._scroll_offset, left_offset, content)
                 if self._rendered.get(screen_row) == cache_key:
                     continue
-                parts.append(move_to(screen_row + 1, 1))
-                parts.append(pad_line(content, self._width - 1))
+                parts.append(move_to(screen_row + 1, col))
+                parts.append(pad_line(content, content_width))
                 self._rendered[screen_row] = cache_key
 
             for screen_row in range(rows_to_show, vp):
-                empty_key = (self._scroll_offset, "")
+                empty_key = (self._scroll_offset, left_offset, "")
                 if self._rendered.get(screen_row) == empty_key:
                     continue
-                parts.append(move_to(screen_row + 1, 1))
-                parts.append(" " * (self._width - 1))
+                parts.append(move_to(screen_row + 1, col))
+                parts.append(" " * content_width)
                 self._rendered[screen_row] = empty_key
 
-            # Status line above the hint line (reverse video).
+            # Status and hint bars align with the content pane.
             if status_text is not None:
-                status_row = vp + 1  # 1-based, first reserved row
-                rendered = f"\033[7m{pad_line(status_text, self._width - 1)}\033[0m"
-                status_key = (-1, status_text)
+                status_row = vp + 1
+                rendered = f"\033[7m{pad_line(status_text, content_width)}\033[0m"
+                status_key = (-1, left_offset, status_text)
                 if self._rendered.get(status_row) != status_key:
-                    parts.append(move_to(status_row, 1))
+                    parts.append(move_to(status_row, col))
                     parts.append(rendered)
                     self._rendered[status_row] = status_key
 
-            # Hint line on the very last terminal row (dim).
             if hint_text is not None:
-                hint_row = self._height  # last row (1-based)
-                rendered_hint = f"\033[2m{pad_line(hint_text, self._width - 1)}\033[0m"
-                hint_key = (-2, hint_text)
+                hint_row = self._height
+                rendered_hint = f"\033[2m{pad_line(hint_text, content_width)}\033[0m"
+                hint_key = (-2, left_offset, hint_text)
                 if self._rendered.get(hint_row) != hint_key:
-                    parts.append(move_to(hint_row, 1))
+                    parts.append(move_to(hint_row, col))
                     parts.append(rendered_hint)
                     self._rendered[hint_row] = hint_key
 
             if parts:
                 self._file.write("".join(parts))
                 self._file.flush()
+
+    def redraw_pane(self, lines: list[str], col: int, width: int) -> None:
+        """Write lines into a left-side pane starting at column *col* (0-based)."""
+        if not self._in_alt:
+            return
+        with self._lock:
+            parts: list[str] = []
+            for i, line in enumerate(lines[: self._height]):
+                parts.append(move_to(i + 1, col + 1))
+                parts.append(pad_line(line, width))
+            for i in range(len(lines), self._height):
+                parts.append(move_to(i + 1, col + 1))
+                parts.append(" " * width)
+            if parts:
+                self._file.write("".join(parts))
+                self._file.flush()
+
+    def redraw_separator(self, col: int) -> None:
+        """Draw a dim vertical separator at column *col* (0-based)."""
+        if not self._in_alt:
+            return
+        with self._lock:
+            parts: list[str] = []
+            for row in range(1, self._height + 1):
+                parts.append(move_to(row, col + 1))
+                parts.append("\033[2m\u2502\033[0m")
+            self._file.write("".join(parts))
+            self._file.flush()
 
     def redraw_lines(self, lines: list[str]) -> None:
         """Write pre-formatted lines to fill the entire screen.

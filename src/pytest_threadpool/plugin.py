@@ -33,6 +33,12 @@ def pytest_addoption(parser):
         default="classic",
         help="Output mode: 'classic' (current) or 'live' (interactive viewer)",
     )
+    parser.addini(
+        "threadpool_tree_width",
+        "Width (columns) of the live-view tree pane. 0 = auto.",
+        type="string",
+        default="0",
+    )
 
 
 def pytest_configure(config):
@@ -84,6 +90,11 @@ def pytest_runtestloop(session):
         if is_tty and file is not None:
             width = getattr(tw, "fullwidth", 80) if tw else 80
             view_manager = ViewManager(file, width)
+            try:
+                tw_cfg = int(session.config.getini("threadpool_tree_width"))
+            except (ValueError, TypeError):
+                tw_cfg = 0
+            view_manager._tree_width_cfg = tw_cfg
             session.config._threadpool_view_manager = view_manager  # pyright: ignore[reportPrivateUsage]
 
             # Show the session header on the alt screen.

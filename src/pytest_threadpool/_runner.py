@@ -222,6 +222,7 @@ class _LiveReporter:
         if view_manager is not None and self._live:
             nlines = len(self._file_order) + 1  # file lines + progress
             self._vm_row_offset = view_manager.allocate_lines(nlines)
+            view_manager.add_test_items([item.nodeid for item in items])
 
         # When True, the next dumb-mode file line prefixes with \n
         # to separate from preceding sequential output.

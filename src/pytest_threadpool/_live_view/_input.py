@@ -44,6 +44,8 @@ _CSI_KEY_MAP: dict[bytes, str] = {
     b"\033[F": "End",
     b"\033[5~": "PageUp",
     b"\033[6~": "PageDown",
+    b"\033[1;5C": "Ctrl+Right",
+    b"\033[1;5D": "Ctrl+Left",
 }
 
 
