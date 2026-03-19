@@ -202,10 +202,11 @@ class TreeOverlay:
                 return
 
     def _activate_current(self) -> str | None:
-        """Toggle expand/collapse on branches; jump on leaves.
+        """Select current node — show its output in the content pane.
 
-        The Summary node at index 0 closes the overlay (returns to
-        the default content view).
+        Leaves jump to a single test.  Branches jump to a group
+        (all descendant tests).  Summary returns to the main view.
+        Expand/collapse is handled by Left/Right, not Enter.
         """
         if self._cursor >= len(self._visible):
             return None
@@ -216,9 +217,22 @@ class TreeOverlay:
             if node.nodeid:
                 return f"jump:{node.nodeid}"
             return "close"
-        node.expanded = not node.expanded
-        self._rebuild()
+        # Branch — collect all descendant leaf nodeids.
+        nodeids = self._collect_leaves(node)
+        if nodeids:
+            return "jumpgroup:" + "\t".join(nodeids)
         return None
+
+    @staticmethod
+    def _collect_leaves(node: TreeNode) -> list[str]:
+        """Recursively collect all leaf nodeids under a branch."""
+        result: list[str] = []
+        for child in node.children:
+            if child.is_leaf and child.nodeid:
+                result.append(child.nodeid)
+            else:
+                result.extend(TreeOverlay._collect_leaves(child))
+        return result
 
     def _build_visible(self) -> list[TreeNode]:
         """Summary node + flattened tree."""

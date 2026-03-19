@@ -92,6 +92,10 @@ class ViewManager:
         self._test_tree: ItemTree | None = None
         # Configurable tree pane width (columns).  0 = auto (1/4 of width).
         self._tree_width_cfg: int = 0
+        # Per-test output buffers keyed by nodeid.
+        self._test_buffers: dict[str, ScreenBuffer] = {}
+        # Which buffer the right pane is showing (None = main content).
+        self._active_nodeid: str | None = None
 
     # --- Dirty-region helpers ---
 
@@ -108,7 +112,7 @@ class ViewManager:
             self._dirty_regions.clear()
         return result
 
-    # --- Test tree ---
+    # --- Test tree / per-test output ---
 
     def add_test_items(self, nodeids: list[str]) -> None:
         """Add test item nodeids to the tree.
@@ -124,6 +128,37 @@ class ViewManager:
         if self._overlay is not None:
             self._overlay._rebuild()
             self._mark_dirty(Region.OVERLAY)
+
+    def set_test_output(self, nodeid: str, lines: list[str]) -> None:
+        """Store captured output lines for a specific test.
+
+        Called by the runner after each test completes.  If the user
+        is currently viewing this test's output, the content pane
+        is refreshed.
+        """
+        buf = ScreenBuffer()
+        if lines:
+            row = buf.add_lines(len(lines))
+            for i, line in enumerate(lines):
+                buf.set_line(row + i, line)
+        self._test_buffers[nodeid] = buf
+        if self._active_nodeid == nodeid:
+            self._mark_dirty(Region.CONTENT)
+
+    @property
+    def _active_buffer(self) -> ScreenBuffer:
+        """The buffer currently shown in the content pane."""
+        if self._active_nodeid is not None:
+            buf = self._test_buffers.get(self._active_nodeid)
+            if buf is None:
+                # Test hasn't finished yet — show a placeholder.
+                buf = ScreenBuffer()
+                row = buf.add_lines(2)
+                buf.set_line(row, self._active_nodeid)
+                buf.set_line(row + 1, "\033[2m(running...)\033[0m")
+                self._test_buffers[self._active_nodeid] = buf
+            return buf
+        return self._compat_buffer
 
     # --- Backward-compatible API (used by _runner.py) ---
 
@@ -198,7 +233,7 @@ class ViewManager:
             self._mark_dirty(Region.CONTENT)
             return
         self._display.redraw_buffer(
-            self._compat_buffer,
+            self._active_buffer,
             scroll_offset=self._user_scroll,
             status_text=self._status_line.text or None,
             hint_text=self._hint_text or None,
@@ -249,6 +284,8 @@ class ViewManager:
             if isinstance(event, KeyEvent) and event.key == "Tab":
                 if self._overlay is not None:
                     self._overlay = None
+                    self._active_nodeid = None
+                    self._user_scroll = None
                     self._display._rendered.clear()
                     self._mark_dirty(Region.CONTENT)
                     return True
@@ -293,15 +330,26 @@ class ViewManager:
                 if self._overlay is not None and self._keyboard_focus == Region.OVERLAY:
                     result = self._overlay.handle_key(event.key)
                     if result == "close":
-                        self._overlay = None
+                        # Return to main summary view.
+                        self._active_nodeid = None
+                        self._user_scroll = None
                         self._display._rendered.clear()
-                        self._mark_dirty(Region.CONTENT)
+                        self._mark_dirty(Region.CONTENT, Region.OVERLAY)
                         return True
+                    if result is not None and result.startswith("jumpgroup:"):
+                        # Switch right pane to combined group output.
+                        nodeids = result[10:].split("\t")
+                        self._show_group(nodeids)
+                        overlay_changed = True
+                        continue
                     if result is not None and result.startswith("jump:"):
-                        self._overlay = None
+                        # Switch right pane to a single test's output.
+                        self._active_nodeid = result[5:]
+                        self._user_scroll = None
                         self._display._rendered.clear()
                         self._mark_dirty(Region.CONTENT)
-                        return True
+                        overlay_changed = True
+                        continue
                     overlay_changed = True
                 else:
                     content_changed = self._apply_content_key(event.key) or content_changed
@@ -314,7 +362,7 @@ class ViewManager:
 
     def _apply_content_scroll(self, *, delta: int) -> bool:
         """Apply a scroll delta to the content pane. Returns True if changed."""
-        total = self._compat_buffer.nlines
+        total = self._active_buffer.nlines
         vp = self._viewport_height
         if total <= vp:
             return False
@@ -326,9 +374,37 @@ class ViewManager:
             self._user_scroll = None
         return True
 
+    def _show_group(self, nodeids: list[str]) -> None:
+        """Build a combined buffer from multiple test outputs and show it."""
+        group_key = "\t".join(nodeids)
+        buf = ScreenBuffer()
+        row = 0
+        for nid in nodeids:
+            test_buf = self._test_buffers.get(nid)
+            if test_buf is not None:
+                for line in test_buf.snapshot():
+                    r = buf.add_lines(1)
+                    buf.set_line(r, line)
+                    row = r + 1
+            else:
+                r = buf.add_lines(2)
+                buf.set_line(r, nid)
+                buf.set_line(r + 1, "\033[2m(running...)\033[0m")
+                row = r + 2
+            # Separator between tests.
+            if row > 0:
+                r = buf.add_lines(1)
+                buf.set_line(r, "")
+                row = r + 1
+        self._test_buffers[group_key] = buf
+        self._active_nodeid = group_key
+        self._user_scroll = None
+        self._display._rendered.clear()
+        self._mark_dirty(Region.CONTENT)
+
     def _apply_content_key(self, key: str) -> bool:
         """Apply a keyboard event to the content pane. Returns True if changed."""
-        total = self._compat_buffer.nlines
+        total = self._active_buffer.nlines
         vp = self._viewport_height
         if total <= vp:
             return False
@@ -434,6 +510,7 @@ class ViewManager:
             dirty = self._consume_dirty()
             tree_w = self._tree_pane_width
 
+            buf = self._active_buffer
             if self._overlay is not None and tree_w > 0:
                 # Split-pane mode: tree on left, content on right.
                 if Region.OVERLAY in dirty:
@@ -441,7 +518,7 @@ class ViewManager:
                     self._display.redraw_separator(tree_w)
                 if Region.CONTENT in dirty:
                     self._display.redraw_buffer(
-                        self._compat_buffer,
+                        buf,
                         scroll_offset=self._user_scroll,
                         status_text=self._status_line.text or None,
                         hint_text=self._hint_text or None,
@@ -453,7 +530,7 @@ class ViewManager:
                     self._display.redraw_lines(self._overlay.render())
             elif Region.CONTENT in dirty:
                 self._display.redraw_buffer(
-                    self._compat_buffer,
+                    buf,
                     scroll_offset=self._user_scroll,
                     status_text=self._status_line.text or None,
                     hint_text=self._hint_text or None,

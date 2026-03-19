@@ -99,7 +99,7 @@ def parse_events(data: bytes) -> list[InputEvent]:
         b = data[i]
         if b == 0x09:
             events.append(KeyEvent(key="Tab"))
-        elif b == 0x0D:
+        elif b in (0x0D, 0x0A):
             events.append(KeyEvent(key="Enter"))
         elif b == 0x03:
             events.append(KeyEvent(key="Ctrl+C"))

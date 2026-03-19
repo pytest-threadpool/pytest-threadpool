@@ -194,18 +194,18 @@ Set in `pyproject.toml`, `pytest.ini`, or `setup.cfg`:
 
 ```toml
 [tool.pytest]
-threadpool_tree_width = 35
+threadpool_tree_width = "35"
 
 # or under ini_options
 [tool.pytest.ini_options]
-threadpool_tree_width = 35
+threadpool_tree_width = "35"
 ```
 
 **pytest.ini:**
 
 ```ini
 [pytest]
-threadpool_tree_width = 35
+threadpool_tree_width = "35"
 ```
 
 ### Live-view keybindings

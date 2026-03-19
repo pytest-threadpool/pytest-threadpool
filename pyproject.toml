@@ -58,6 +58,7 @@ packages = ["src/pytest_threadpool"]
 [tool.pytest]
 minversion = "9.0"
 addopts = ["--threadpool", "auto"]
+threadpool_tree_width = "35"
 norecursedirs = ["cases", "examples"]
 
 [tool.pyright]

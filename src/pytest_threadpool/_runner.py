@@ -142,6 +142,53 @@ _DIM = "\033[2m"
 _RESET = "\033[0m"
 
 
+def _format_test_output(item, report, call_rep) -> list[str]:
+    """Build display lines for a single test's output.
+
+    Includes: nodeid, outcome, captured stdout/stderr, and traceback.
+    """
+    lines: list[str] = []
+    # Header: nodeid + outcome.
+    outcome = report.outcome.upper()
+    if hasattr(report, "wasxfail"):
+        outcome = "XFAIL" if report.skipped else "XPASS"
+    elif getattr(report, "when", "call") != "call" and report.failed:
+        outcome = "ERROR"
+    color = {
+        "PASSED": _GREEN,
+        "FAILED": _RED_BOLD,
+        "ERROR": _RED_BOLD,
+        "SKIPPED": _YELLOW,
+        "XFAIL": _YELLOW,
+        "XPASS": _RED_BOLD,
+    }.get(outcome, "")
+    reset = _RESET if color else ""
+    lines.append(f"{color}{outcome}{reset}  {item.nodeid}")
+    lines.append("")
+
+    # Sections (captured stdout, stderr, log).
+    source = call_rep if call_rep is not None else report
+    for section_name, section_content in getattr(source, "sections", []):
+        lines.append(f"{_DIM}--- {section_name} ---{_RESET}")
+        for line in section_content.splitlines():
+            lines.append(line)
+        lines.append("")
+
+    # Traceback / longrepr.
+    longrepr = getattr(source, "longrepr", None)
+    if longrepr is not None:
+        lines.append(f"{_DIM}--- traceback ---{_RESET}")
+        for line in str(longrepr).splitlines():
+            lines.append(line)
+
+    # Skip / xfail reason.
+    wasxfail = getattr(report, "wasxfail", None)
+    if wasxfail:
+        lines.append(f"{_DIM}reason: {wasxfail}{_RESET}")
+
+    return lines
+
+
 class _LiveReporter:
     """Reports parallel results with live per-file line updates.
 
@@ -758,6 +805,13 @@ class ParallelRunner:
             f.write(f"\n{item.nodeid} {color}{word}{reset}")
             f.flush()
 
+        if self._view_manager is not None:
+            report = call_rep if call_rep is not None else rep_setup
+            self._view_manager.set_test_output(
+                item.nodeid,
+                _format_test_output(item, report, call_rep),
+            )
+
     def _run_parallel(self, items, after_sequential: bool = False, next_group_first=None) -> None:
         """Run a group's tests with parallel fixture setup and calls.
 
@@ -1110,6 +1164,13 @@ class ParallelRunner:
             finally:
                 live.restore()
             live.mark_done(item, report)
+
+            # Populate the per-test output buffer for the live tree view.
+            if self._view_manager is not None:
+                self._view_manager.set_test_output(
+                    item.nodeid,
+                    _format_test_output(item, report, call_rep),
+                )
 
             reported.add(item)
 
