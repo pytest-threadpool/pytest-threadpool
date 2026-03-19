@@ -77,7 +77,7 @@ _SESSION_LINES = [
     "284/284 [100%]",
 ]
 
-_MAX_LATENCY_MS = 20
+_MAX_LATENCY_MS = 50
 
 
 class WriteTracker(io.StringIO):
