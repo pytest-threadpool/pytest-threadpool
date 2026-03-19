@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import enum
 import os
+import re
 import signal
 import threading
 import time
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
 _SCROLL_LINES = 3
 # Target refresh rate for the background refresh thread.
 _REFRESH_INTERVAL = 1.0 / 30  # ~30 fps
+# Strip ANSI escape sequences for text search.
+_ANSI_RE = re.compile(r"\033\[[^m]*m")
 
 
 class Region(enum.StrEnum):
@@ -60,8 +63,9 @@ class ViewManager:
         self._active_field: Field = self._root_field
         self._status_line = StatusLine(Position.BOTTOM)
         self._hint_text = (
-            "  \u2191\u2193 scroll   PgUp/PgDn page   Home/End"
-            "   Tab tree   Ctrl+\u2190\u2192 focus   Ctrl+C exit"
+            "  \u2191\u2193 scroll  PgUp/PgDn  Home/End"
+            "  Tab tree  Ctrl+\u2190\u2192 focus"
+            "  /search  Ctrl+S save  Ctrl+P/X filter  Ctrl+C exit"
         )
         self._cursor = Cursor()
         self._layout = LayoutManager()
@@ -94,8 +98,15 @@ class ViewManager:
         self._tree_width_cfg: int = 0
         # Per-test output buffers keyed by nodeid.
         self._test_buffers: dict[str, ScreenBuffer] = {}
+        # Per-test outcome keyed by nodeid (e.g. "passed", "failed").
+        self._test_outcomes: dict[str, str] = {}
         # Which buffer the right pane is showing (None = main content).
         self._active_nodeid: str | None = None
+        # Content pane search (Ctrl+/ to activate, n/N to navigate).
+        self._content_search: str = ""
+        self._content_search_active: bool = False
+        self._content_match_lines: list[int] = []
+        self._content_match_idx: int = -1
 
     # --- Dirty-region helpers ---
 
@@ -129,7 +140,7 @@ class ViewManager:
             self._overlay._rebuild()
             self._mark_dirty(Region.OVERLAY)
 
-    def set_test_output(self, nodeid: str, lines: list[str]) -> None:
+    def set_test_output(self, nodeid: str, lines: list[str], *, outcome: str = "") -> None:
         """Store captured output lines for a specific test.
 
         Called by the runner after each test completes.  If the user
@@ -142,6 +153,8 @@ class ViewManager:
             for i, line in enumerate(lines):
                 buf.set_line(row + i, line)
         self._test_buffers[nodeid] = buf
+        if outcome:
+            self._test_outcomes[nodeid] = outcome
 
         active = self._active_nodeid
         if active is None:
@@ -300,6 +313,7 @@ class ViewManager:
                         self._width,
                         self._height,
                         pane_width=pw,
+                        outcomes=self._test_outcomes,
                     )
                     self._keyboard_focus = Region.OVERLAY
                     self._display._rendered.clear()
@@ -323,7 +337,8 @@ class ViewManager:
             if isinstance(event, MouseEvent) and event.button in (64, 65):
                 mouse_delta = -_SCROLL_LINES if event.button == 64 else _SCROLL_LINES
                 if self._overlay is not None and tree_w > 0 and event.col < tree_w:
-                    self._overlay.scroll(mouse_delta)
+                    # Tree navigates 1 item per tick (cursor movement).
+                    self._overlay.scroll(-1 if event.button == 64 else 1)
                     overlay_changed = True
                 else:
                     content_changed = self._apply_content_scroll(delta=mouse_delta)
@@ -401,6 +416,46 @@ class ViewManager:
 
     def _apply_content_key(self, key: str) -> bool:
         """Apply a keyboard event to the content pane. Returns True if changed."""
+        # --- Search input mode ---
+        if self._content_search_active:
+            if key == "Escape":
+                self._content_search_active = False
+                return True
+            if key == "Enter":
+                self._content_search_active = False
+                self._run_content_search()
+                return True
+            if key == "Backspace":
+                self._content_search = self._content_search[:-1]
+                return True
+            if len(key) == 1 and key.isprintable():
+                self._content_search += key
+                return True
+            return False
+
+        # --- Search activation and navigation ---
+        if key == "/":
+            self._content_search_active = True
+            self._content_search = ""
+            self._content_match_lines = []
+            self._content_match_idx = -1
+            return True
+        if key == "Escape" and self._content_match_lines:
+            self._content_search = ""
+            self._content_match_lines = []
+            self._content_match_idx = -1
+            return True
+        if key == "n" and self._content_match_lines:
+            return self._jump_content_match(1)
+        if key == "N" and self._content_match_lines:
+            return self._jump_content_match(-1)
+
+        # --- Save to file ---
+        if key == "Ctrl+s":
+            self._save_active_buffer()
+            return True
+
+        # --- Normal scroll ---
         total = self._active_buffer.nlines
         vp = self._viewport_height
         if total <= vp:
@@ -423,6 +478,82 @@ class ViewManager:
         else:
             return False
         return self._apply_content_scroll(delta=delta)
+
+    def _run_content_search(self) -> None:
+        """Find all lines matching the search query in the active buffer."""
+        self._content_match_lines = []
+        self._content_match_idx = -1
+        if not self._content_search:
+            return
+        q = self._content_search.lower()
+        for i, line in enumerate(self._active_buffer.snapshot()):
+            plain = _ANSI_RE.sub("", line).lower()
+            if q in plain:
+                self._content_match_lines.append(i)
+        if self._content_match_lines:
+            self._content_match_idx = 0
+            self._scroll_to_line(self._content_match_lines[0])
+
+    def _jump_content_match(self, direction: int) -> bool:
+        """Jump to the next/previous search match."""
+        if not self._content_match_lines:
+            return False
+        self._content_match_idx = (self._content_match_idx + direction) % len(
+            self._content_match_lines
+        )
+        self._scroll_to_line(self._content_match_lines[self._content_match_idx])
+        return True
+
+    def _scroll_to_line(self, line: int) -> None:
+        """Scroll the content pane so the given line is visible."""
+        vp = self._viewport_height
+        total = self._active_buffer.nlines
+        if total <= vp:
+            self._user_scroll = None
+            return
+        max_off = total - vp
+        # Center the target line in the viewport.
+        target = max(0, min(line - vp // 2, max_off))
+        self._user_scroll = target if target < max_off else None
+
+    def _save_active_buffer(self) -> None:
+        """Save the full active buffer to a .log file."""
+        import time as _time
+
+        lines = self._active_buffer.snapshot()
+        # Strip ANSI from all lines.
+        plain = [_ANSI_RE.sub("", line) for line in lines]
+
+        # Build filename from active nodeid or "summary".
+        nodeid = self._active_nodeid or "summary"
+        # Sanitise: replace path separators and :: with underscores.
+        name = nodeid.replace("/", "_").replace("::", "_").replace("\t", "_")
+        # Truncate overly long names.
+        if len(name) > 80:
+            name = name[:80]
+        ts = _time.strftime("%Y%m%d_%H%M%S")
+        filename = f"{name}_{ts}.log"
+
+        try:
+            with open(filename, "w") as f:
+                f.write("\n".join(plain))
+                f.write("\n")
+            self._status_line.set_text(f"saved: {filename}")
+        except OSError as exc:
+            self._status_line.set_text(f"save failed: {exc}")
+        self._mark_dirty(Region.CONTENT)
+
+    @property
+    def _effective_status(self) -> str | None:
+        """Status text, overridden by the content search bar when active."""
+        if self._content_search_active:
+            q = self._content_search
+            return f"/{q}\u2588"
+        if self._content_match_lines and self._content_match_idx >= 0:
+            idx = self._content_match_idx + 1
+            total = len(self._content_match_lines)
+            return f"/{self._content_search}  [{idx}/{total}]  n/N next/prev  Esc clear"
+        return self._status_line.text or None
 
     def wait_and_leave(self) -> None:
         """Show status prompt, wait for Ctrl+C, then leave + dump.
@@ -508,6 +639,13 @@ class ViewManager:
             tree_w = self._tree_pane_width
 
             buf = self._active_buffer
+            status = self._effective_status
+            hl = self._content_search if self._content_match_lines else ""
+            hl_line = (
+                self._content_match_lines[self._content_match_idx]
+                if self._content_match_lines and self._content_match_idx >= 0
+                else -1
+            )
             if self._overlay is not None and tree_w > 0:
                 # Split-pane mode: tree on left, content on right.
                 if Region.OVERLAY in dirty:
@@ -517,9 +655,11 @@ class ViewManager:
                     self._display.redraw_buffer(
                         buf,
                         scroll_offset=self._user_scroll,
-                        status_text=self._status_line.text or None,
+                        status_text=status,
                         hint_text=self._hint_text or None,
                         left_offset=tree_w + 1,
+                        highlight=hl,
+                        highlight_line=hl_line,
                     )
             elif self._overlay is not None:
                 # Narrow terminal — full-screen overlay fallback.
@@ -529,8 +669,10 @@ class ViewManager:
                 self._display.redraw_buffer(
                     buf,
                     scroll_offset=self._user_scroll,
-                    status_text=self._status_line.text or None,
+                    status_text=status,
                     hint_text=self._hint_text or None,
+                    highlight=hl,
+                    highlight_line=hl_line,
                 )
 
     def _stop_refresh_loop(self) -> None:

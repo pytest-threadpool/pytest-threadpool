@@ -142,6 +142,19 @@ _DIM = "\033[2m"
 _RESET = "\033[0m"
 
 
+def _outcome_key(report) -> str:
+    """Return a short outcome key for a test report."""
+    if hasattr(report, "wasxfail"):
+        return "xfail" if report.skipped else "xpass"
+    if report.passed:
+        return "passed"
+    if report.failed:
+        return "error" if getattr(report, "when", "call") != "call" else "failed"
+    if report.skipped:
+        return "skipped"
+    return ""
+
+
 def _format_test_output(item, report, call_rep) -> list[str]:
     """Build display lines for a single test's output.
 
@@ -172,12 +185,24 @@ def _format_test_output(item, report, call_rep) -> list[str]:
         for line in section_content.rstrip("\n").splitlines():
             lines.append(line)
 
-    # Traceback / longrepr.
+    # Traceback / longrepr — use toterminal() for colored output.
     longrepr = getattr(source, "longrepr", None)
     if longrepr is not None:
         lines.append(f"{_DIM}--- traceback ---{_RESET}")
-        for line in str(longrepr).splitlines():
-            lines.append(line)
+        if hasattr(longrepr, "toterminal"):
+            import io as _io
+
+            from _pytest._io import TerminalWriter as _TW
+
+            buf = _io.StringIO()
+            tw = _TW(buf)
+            tw.hasmarkup = True
+            longrepr.toterminal(tw)
+            for line in buf.getvalue().splitlines():
+                lines.append(line)
+        else:
+            for line in str(longrepr).splitlines():
+                lines.append(line)
 
     # Skip / xfail reason.
     wasxfail = getattr(report, "wasxfail", None)
@@ -808,6 +833,7 @@ class ParallelRunner:
             self._view_manager.set_test_output(
                 item.nodeid,
                 _format_test_output(item, report, call_rep),
+                outcome=_outcome_key(report),
             )
 
     def _run_parallel(self, items, after_sequential: bool = False, next_group_first=None) -> None:
@@ -1168,6 +1194,7 @@ class ParallelRunner:
                 self._view_manager.set_test_output(
                     item.nodeid,
                     _format_test_output(item, report, call_rep),
+                    outcome=_outcome_key(report),
                 )
 
             reported.add(item)

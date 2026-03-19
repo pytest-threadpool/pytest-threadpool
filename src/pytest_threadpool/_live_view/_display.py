@@ -28,6 +28,45 @@ if TYPE_CHECKING:
     from pytest_threadpool._live_view._buffer import ScreenBuffer
 
 
+import re
+
+_ANSI_RE = re.compile(r"\033\[[^m]*m")
+_HL_OTHER = "\033[48;5;238;37m"  # dark grey bg, white text
+_HL_CURRENT = "\033[48;5;214;30m"  # orange bg, black text
+_HL_END = "\033[0m"
+
+
+def _highlight_matches(line: str, query: str, *, current: bool = False) -> str:
+    """Highlight case-insensitive matches in a line, skipping ANSI codes.
+
+    *current* selects the "active match" style (orange) vs the default
+    (dark grey) for non-current matches.
+    """
+    if not query:
+        return line
+    hl = _HL_CURRENT if current else _HL_OTHER
+    q = query.lower()
+    parts = _ANSI_RE.split(line)
+    codes = _ANSI_RE.findall(line)
+    result: list[str] = []
+    for i, part in enumerate(parts):
+        lower = part.lower()
+        pos = 0
+        while pos < len(part):
+            idx = lower.find(q, pos)
+            if idx < 0:
+                result.append(part[pos:])
+                break
+            result.append(part[pos:idx])
+            result.append(hl)
+            result.append(part[idx : idx + len(q)])
+            result.append(_HL_END)
+            pos = idx + len(q)
+        if i < len(codes):
+            result.append(codes[i])
+    return "".join(result)
+
+
 class Display:
     """Alternate-screen terminal display.
 
@@ -154,6 +193,8 @@ class Display:
         status_text: str | None = None,
         hint_text: str | None = None,
         left_offset: int = 0,
+        highlight: str = "",
+        highlight_line: int = -1,
     ) -> None:
         """Render a ScreenBuffer viewport with dirty tracking.
 
@@ -194,11 +235,21 @@ class Display:
             for screen_row in range(rows_to_show):
                 buf_row = self._scroll_offset + screen_row
                 content = lines[buf_row]
-                cache_key = (self._scroll_offset, left_offset, content)
+                cache_key = (
+                    self._scroll_offset,
+                    left_offset,
+                    highlight,
+                    highlight_line,
+                    content,
+                )
                 if self._rendered.get(screen_row) == cache_key:
                     continue
+                rendered_line = content
+                if highlight:
+                    is_current = buf_row == highlight_line
+                    rendered_line = _highlight_matches(content, highlight, current=is_current)
                 parts.append(move_to(screen_row + 1, col))
-                parts.append(pad_line(content, content_width))
+                parts.append(pad_line(rendered_line, content_width))
                 self._rendered[screen_row] = cache_key
 
             for screen_row in range(rows_to_show, vp):

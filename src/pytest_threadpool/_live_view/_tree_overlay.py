@@ -20,6 +20,19 @@ _CYAN = "\033[36m"
 _YELLOW = "\033[33m"
 _REVERSE = "\033[7m"
 _RESET = "\033[0m"
+_UNDERLINE = "\033[4m"
+_GREEN = "\033[32m"
+_RED_BOLD = "\033[31;1m"
+
+# Outcome markers shown next to leaf nodes in the tree.
+_OUTCOME_MARKER: dict[str, str] = {
+    "passed": f" {_GREEN}\u2713{_RESET}",
+    "failed": f" {_RED_BOLD}\u2717{_RESET}",
+    "error": f" {_RED_BOLD}E{_RESET}",
+    "skipped": f" {_YELLOW}s{_RESET}",
+    "xfail": f" {_YELLOW}x{_RESET}",
+    "xpass": f" {_RED_BOLD}X{_RESET}",
+}
 
 # Tree drawing characters
 _BRANCH = "\u251c\u2500 "  # ├─
@@ -45,6 +58,25 @@ class TreeNode:
     @property
     def is_leaf(self) -> bool:
         return len(self.children) == 0
+
+
+def _fuzzy_match(query: str, text: str) -> bool:
+    """fzf-style subsequence match: each query char appears in order."""
+    qi = 0
+    for ch in text:
+        if qi < len(query) and ch == query[qi]:
+            qi += 1
+    return qi == len(query)
+
+
+def _has_matching_descendant(node: TreeNode, query: str) -> bool:
+    """Check if any descendant's label fuzzy-matches the query."""
+    for child in node.children:
+        if _fuzzy_match(query, child.label.lower()):
+            return True
+        if not child.is_leaf and _has_matching_descendant(child, query):
+            return True
+    return False
 
 
 class ItemTree:
@@ -119,15 +151,20 @@ class TreeOverlay:
         height: int,
         *,
         pane_width: int | None = None,
+        outcomes: dict[str, str] | None = None,
     ) -> None:
         self._tree = tree
         self._width = pane_width if pane_width is not None else width
         self._height = height
         self._cursor = 0
         self._scroll = 0
+        self._outcomes = outcomes or {}
         # "Summary" is a virtual top-level node that returns the user
         # to the default content view when activated.
         self._summary_node = TreeNode(label="Summary", depth=0, nodeid="")
+        self._query = ""
+        self._show_passed = True
+        self._show_failed = True
         self._visible = self._build_visible()
 
     def scroll(self, delta: int) -> None:
@@ -144,19 +181,29 @@ class TreeOverlay:
             ``"jump:<nodeid>"`` — dismiss and jump to the given nodeid.
             ``None`` — stay in the overlay (handled internally).
         """
-        if key in ("Escape", "Tab"):
+        if key == "Tab":
             return "close"
-        if key == "Up":
+        if key == "Escape":
+            if self._query:
+                self._query = ""
+                self._rebuild()
+            else:
+                return "close"
+        elif key == "Backspace":
+            if self._query:
+                self._query = self._query[:-1]
+                self._rebuild()
+        elif key == "Up":
             self._cursor = max(0, self._cursor - 1)
             self._ensure_visible()
         elif key == "Down":
             self._cursor = min(len(self._visible) - 1, self._cursor + 1)
             self._ensure_visible()
         elif key == "PageUp":
-            self._cursor = max(0, self._cursor - (self._height - 2))
+            self._cursor = max(0, self._cursor - (self._height - 3))
             self._ensure_visible()
         elif key == "PageDown":
-            self._cursor = min(len(self._visible) - 1, self._cursor + (self._height - 2))
+            self._cursor = min(len(self._visible) - 1, self._cursor + (self._height - 3))
             self._ensure_visible()
         elif key == "Home":
             self._cursor = 0
@@ -170,6 +217,15 @@ class TreeOverlay:
             self._collapse_current()
         elif key == "Enter":
             return self._activate_current()
+        elif key == "Ctrl+p":
+            self._show_passed = not self._show_passed
+            self._rebuild()
+        elif key == "Ctrl+x":
+            self._show_failed = not self._show_failed
+            self._rebuild()
+        elif len(key) == 1 and key.isprintable():
+            self._query += key
+            self._rebuild()
         return None
 
     def _expand_current(self) -> None:
@@ -223,6 +279,21 @@ class TreeOverlay:
             return "jumpgroup:" + "\t".join(nodeids)
         return None
 
+    _FAIL_OUTCOMES = frozenset({"failed", "error", "xpass"})
+
+    def _group_outcome(self, node: TreeNode) -> str:
+        """Aggregate outcome for a branch: failed if any fail, passed if all done."""
+        leaves = self._collect_leaves(node)
+        if not leaves:
+            return ""
+        outcomes = [self._outcomes.get(nid, "") for nid in leaves]
+        if any(o in self._FAIL_OUTCOMES for o in outcomes):
+            return "failed"
+        if all(o for o in outcomes):
+            # All have an outcome (none still running).
+            return "passed"
+        return ""
+
     @staticmethod
     def _collect_leaves(node: TreeNode) -> list[str]:
         """Recursively collect all leaf nodeids under a branch."""
@@ -234,12 +305,50 @@ class TreeOverlay:
                 result.extend(TreeOverlay._collect_leaves(child))
         return result
 
+    def _is_hidden(self, node: TreeNode) -> bool:
+        """Check if a leaf node should be hidden by outcome filters."""
+        if not node.is_leaf or not node.nodeid:
+            return False
+        outcome = self._outcomes.get(node.nodeid, "")
+        if not outcome:
+            return False  # still running — always show
+        if not self._show_passed and outcome in ("passed", "xfail"):
+            return True
+        return not self._show_failed and outcome in ("failed", "error", "xpass")
+
+    def _has_visible_leaf(self, node: TreeNode, query: str) -> bool:
+        """Check if a branch has any visible descendant after all filters."""
+        for child in node.children:
+            if child.is_leaf:
+                if self._is_hidden(child):
+                    continue
+                if query and not _fuzzy_match(query, child.label.lower()):
+                    continue
+                return True
+            if self._has_visible_leaf(child, query):
+                return True
+        return False
+
     def _build_visible(self) -> list[TreeNode]:
-        """Summary node + flattened tree."""
-        return [self._summary_node, *self._tree.flat_visible()]
+        """Summary node + flattened tree, filtered by query and toggles."""
+        all_nodes = self._tree.flat_visible()
+        q = self._query.lower() if self._query else ""
+        filtered: list[TreeNode] = []
+        for node in all_nodes:
+            if self._is_hidden(node):
+                continue
+            if not node.is_leaf and not self._has_visible_leaf(node, q):
+                continue
+            if q and not (
+                _fuzzy_match(q, node.label.lower())
+                or (not node.is_leaf and _has_matching_descendant(node, q))
+            ):
+                continue
+            filtered.append(node)
+        return [self._summary_node, *filtered]
 
     def _rebuild(self) -> None:
-        """Rebuild the flat visible list after expand/collapse changes."""
+        """Rebuild the flat visible list after expand/collapse or query change."""
         self._visible = self._build_visible()
         if self._cursor >= len(self._visible):
             self._cursor = max(0, len(self._visible) - 1)
@@ -247,7 +356,9 @@ class TreeOverlay:
 
     def _ensure_visible(self) -> None:
         """Scroll so the cursor is within the visible viewport."""
-        view_h = self._height - 1  # 1 row for the title bar
+        view_h = self._height - 2  # title bar + search bar
+        if view_h < 1:
+            view_h = 1
         if self._cursor < self._scroll:
             self._scroll = self._cursor
         elif self._cursor >= self._scroll + view_h:
@@ -256,18 +367,31 @@ class TreeOverlay:
     def render(self) -> list[str]:
         """Render the overlay as a list of terminal lines."""
         lines: list[str] = []
-        keys = "Tab close  \u2190\u2192 fold  Enter select"
-        title = f" {_BOLD}Test Tree{_RESET} {_DIM}{keys}{_RESET}"
+        # Title bar with filter toggles.
+        p_tag = f"{_GREEN}\u2713pass{_RESET}" if self._show_passed else f"{_DIM}pass{_RESET}"
+        f_tag = f"{_RED_BOLD}\u2717fail{_RESET}" if self._show_failed else f"{_DIM}fail{_RESET}"
+        title = f" {_BOLD}Test Tree{_RESET} {p_tag} {f_tag}"
         lines.append(title)
 
-        view_h = self._height - 1
+        # Tree nodes.
+        view_h = self._height - 2  # title + search bar
+        if view_h < 1:
+            view_h = 1
         end = min(self._scroll + view_h, len(self._visible))
-
         for i in range(self._scroll, end):
             lines.append(self._render_node(self._visible[i], i))
 
-        while len(lines) < self._height:
+        # Pad to push search bar to the bottom.
+        while len(lines) < self._height - 1:
             lines.append("")
+
+        # Search bar at the bottom (reverse-video background).
+        w = self._width
+        if self._query:
+            inner = f" {_CYAN}/{_RESET}{_REVERSE} {self._query}\u2588"
+        else:
+            inner = f" {_DIM}{_REVERSE} type to search"
+        lines.append(f"{_REVERSE}{pad_line(inner, w)}{_RESET}")
 
         return lines
 
@@ -276,11 +400,20 @@ class TreeOverlay:
         indent = "  " * (node.depth - 1) if node.depth > 0 else ""
 
         if node.is_leaf:
-            icon = ""
+            icon = "  "  # align with text after ▼/▶ on branches
         elif node.expanded:
             icon = _EXPANDED
         else:
             icon = _COLLAPSED
+
+        # Outcome marker.
+        marker = ""
+        if node.is_leaf and node.nodeid:
+            outcome = self._outcomes.get(node.nodeid, "")
+            marker = _OUTCOME_MARKER.get(outcome, "")
+        elif not node.is_leaf and node is not self._summary_node:
+            group_outcome = self._group_outcome(node)
+            marker = _OUTCOME_MARKER.get(group_outcome, "")
 
         # Style based on node type.
         if node is self._summary_node:
@@ -292,7 +425,7 @@ class TreeOverlay:
         else:
             styled_label = f"{_YELLOW}{node.label}{_RESET}"
 
-        text = f" {indent}{icon}{styled_label}"
+        text = f" {indent}{icon}{styled_label}{marker}"
 
         # Highlight cursor line.
         if idx == self._cursor:

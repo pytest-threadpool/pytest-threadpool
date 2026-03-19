@@ -85,7 +85,7 @@ class TestItemTree:
         assert "test_a[param1]" in param_labels
 
 
-class ItemTreeOverlay:
+class TestTreeOverlayNav:
     """TreeOverlay handles navigation and rendering."""
 
     def _make_overlay(self, height: int = 20, width: int = 80) -> TreeOverlay:
@@ -120,21 +120,22 @@ class ItemTreeOverlay:
         assert ov._visible[0].label == "Summary"
         assert ov.handle_key("Enter") == "close"
 
-    def test_enter_on_branch_toggles(self):
+    def test_enter_on_branch_returns_jumpgroup(self):
         ov = self._make_overlay()
         # Index 1 is "tests" (a branch).
         ov.handle_key("Down")
         node = ov._visible[ov._cursor]
         assert not node.is_leaf
-        was_expanded = node.expanded
-        ov.handle_key("Enter")
-        assert node.expanded != was_expanded
+        result = ov.handle_key("Enter")
+        assert result is not None
+        assert result.startswith("jumpgroup:")
 
     def test_enter_on_leaf_returns_jump(self):
         ov = self._make_overlay()
-        # Navigate to a leaf node.
+        # Navigate past Summary to a leaf node.
         for _i in range(20):
-            if ov._cursor < len(ov._visible) and ov._visible[ov._cursor].is_leaf:
+            node = ov._visible[ov._cursor]
+            if node.is_leaf and node.nodeid:
                 break
             ov.handle_key("Down")
         result = ov.handle_key("Enter")
@@ -163,14 +164,14 @@ class ItemTreeOverlay:
 
     def test_left_on_leaf_collapses_parent(self):
         ov = self._make_overlay()
-        # Navigate to a leaf.
+        # Navigate past Summary to a leaf with depth > 0.
         for _i in range(20):
-            if ov._cursor < len(ov._visible) and ov._visible[ov._cursor].is_leaf:
+            node = ov._visible[ov._cursor]
+            if node.is_leaf and node.depth > 0 and node.nodeid:
                 break
             ov.handle_key("Down")
         leaf_depth = ov._visible[ov._cursor].depth
         ov.handle_key("Left")
-        # Cursor should move to the parent (lower depth).
         assert ov._visible[ov._cursor].depth < leaf_depth
 
     def test_render_returns_correct_height(self):
@@ -186,8 +187,8 @@ class ItemTreeOverlay:
     def test_page_down_moves_by_page(self):
         ov = self._make_overlay(height=5)
         ov.handle_key("PageDown")
-        # Should move by height - 2 = 3.
-        assert ov._cursor == 3
+        # Should move by height - 3 = 2 (title + search bar).
+        assert ov._cursor == 2
 
     def test_home_goes_to_top(self):
         ov = self._make_overlay()
@@ -199,3 +200,62 @@ class ItemTreeOverlay:
         ov = self._make_overlay()
         ov.handle_key("End")
         assert ov._cursor == len(ov._visible) - 1
+
+    def test_typing_filters_tree(self):
+        ov = self._make_overlay()
+        total_before = len(ov._visible)
+        ov.handle_key("a")  # type 'a'
+        ov.handle_key("l")  # type 'l' → query="al"
+        assert ov._query == "al"
+        # Should filter to nodes matching "al" (TestAlpha, test_alpha, etc.)
+        assert len(ov._visible) < total_before
+
+    def test_backspace_removes_char(self):
+        ov = self._make_overlay()
+        ov.handle_key("a")
+        ov.handle_key("l")
+        assert ov._query == "al"
+        ov.handle_key("Backspace")
+        assert ov._query == "a"
+
+    def test_escape_clears_query_first(self):
+        ov = self._make_overlay()
+        ov.handle_key("a")
+        assert ov._query == "a"
+        result = ov.handle_key("Escape")
+        # Should clear query, not close.
+        assert result is None
+        assert ov._query == ""
+
+    def test_escape_closes_when_empty_query(self):
+        ov = self._make_overlay()
+        assert ov._query == ""
+        result = ov.handle_key("Escape")
+        assert result == "close"
+
+    def test_search_bar_rendered_at_bottom(self):
+        ov = self._make_overlay(height=10)
+        lines = ov.render()
+        assert "type to search" in lines[-1]
+        ov.handle_key("f")
+        ov.handle_key("o")
+        lines = ov.render()
+        assert "fo" in lines[-1]
+
+    def test_fuzzy_match_subsequence(self):
+        ov = self._make_overlay()
+        ov.handle_key("t")
+        ov.handle_key("o")  # "to" matches "test_one"
+        labels = [n.label for n in ov._visible]
+        assert "test_one" in labels
+
+    def test_empty_query_shows_all(self):
+        ov = self._make_overlay()
+        total = len(ov._visible)
+        ov.handle_key("z")
+        ov.handle_key("z")
+        ov.handle_key("z")  # no match
+        ov.handle_key("Backspace")
+        ov.handle_key("Backspace")
+        ov.handle_key("Backspace")
+        assert len(ov._visible) == total
