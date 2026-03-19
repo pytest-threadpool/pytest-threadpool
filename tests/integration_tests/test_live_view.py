@@ -592,6 +592,83 @@ class TestLiveViewOutcomes:
         assert "1 passed" in raw or "passed" in raw, f"Missing passed count in summary:\n{raw}"
 
 
+class TestLiveViewTreePanel:
+    """Tree panel integration: split pane renders and context switch works."""
+
+    def test_tree_panel_shows_test_names(self, ftdir):
+        """Tab opens the tree panel which contains test names."""
+        ftdir.makepyfile(SIMPLE_TESTS)
+        master_fd, slave_fd = pty.openpty()
+        _set_pty_size(slave_fd, rows=24, cols=120)
+        env = os.environ.copy()
+        env.pop("TEAMCITY_VERSION", None)
+        env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "120"
+        env["LINES"] = "24"
+        args = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(ftdir.path),
+            "--basetemp",
+            str(ftdir.path / ".tmp"),
+            "--threadpool",
+            "3",
+            "--threadpool-output",
+            "live",
+        ]
+        proc = subprocess.Popen(
+            args,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(ftdir.path),
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+        try:
+            combined = b""
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.5)
+                if ready:
+                    data = os.read(master_fd, 4096)
+                    if not data:
+                        break
+                    combined += data
+                    if b"tests complete" in combined:
+                        break
+            assert b"tests complete" in combined
+
+            # Send Tab to open tree panel.
+            os.write(master_fd, b"\x09")
+            time.sleep(0.3)
+
+            # Read tree panel output.
+            tree_output = b""
+            dl2 = time.monotonic() + 2
+            while time.monotonic() < dl2:
+                ready, _, _ = select.select([master_fd], [], [], 0.1)
+                if ready:
+                    tree_output += os.read(master_fd, 65536)
+                else:
+                    break
+            full = (combined + tree_output).decode("utf-8", errors="replace")
+
+            # Tree should contain test file name and "Test Tree" title.
+            assert "Test Tree" in full, f"Tree panel not visible:\n{full[-1000:]}"
+            assert "test_file.py" in full, f"Test file not in tree:\n{full[-1000:]}"
+        finally:
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+                time.sleep(0.2)
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+            os.close(master_fd)
+
+
 class TestLiveViewOptionValidation:
     """Verify the --threadpool-output option is properly validated."""
 

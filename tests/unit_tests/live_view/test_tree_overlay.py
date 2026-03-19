@@ -259,3 +259,67 @@ class TestTreeOverlayNav:
         ov.handle_key("Backspace")
         ov.handle_key("Backspace")
         assert len(ov._visible) == total
+
+    def test_ctrl_p_hides_passed(self):
+        ov = self._make_overlay()
+        ov._outcomes["tests/test_foo.py::TestAlpha::test_one"] = "passed"
+        ov._outcomes["tests/test_foo.py::TestAlpha::test_two"] = "failed"
+        total_before = len(ov._visible)
+        ov.handle_key("Ctrl+p")
+        assert not ov._show_passed
+        assert len(ov._visible) < total_before
+        labels = [n.label for n in ov._visible if n.is_leaf]
+        assert "test_one" not in labels
+        assert "test_two" in labels
+
+    def test_ctrl_x_hides_failed(self):
+        ov = self._make_overlay()
+        ov._outcomes["tests/test_foo.py::TestAlpha::test_one"] = "passed"
+        ov._outcomes["tests/test_foo.py::TestAlpha::test_two"] = "failed"
+        ov.handle_key("Ctrl+x")
+        assert not ov._show_failed
+        labels = [n.label for n in ov._visible if n.is_leaf]
+        assert "test_one" in labels
+        assert "test_two" not in labels
+
+    def test_empty_groups_hidden_by_filter(self):
+        tree = ItemTree(
+            [
+                "tests/test_a.py::test_pass",
+                "tests/test_b.py::test_fail",
+            ]
+        )
+        ov = TreeOverlay(
+            tree,
+            80,
+            20,
+            outcomes={
+                "tests/test_a.py::test_pass": "passed",
+                "tests/test_b.py::test_fail": "failed",
+            },
+        )
+        ov.handle_key("Ctrl+p")  # hide passed
+        labels = [n.label for n in ov._visible]
+        assert "test_a.py" not in labels
+        assert "test_b.py" in labels
+
+    def test_group_outcome_marker_passed(self):
+        ov = self._make_overlay()
+        for n in ov._visible:
+            if n.is_leaf and n.nodeid:
+                ov._outcomes[n.nodeid] = "passed"
+        lines = ov.render()
+        # Branch nodes should have the green check mark
+        rendered = "\n".join(lines)
+        assert "\u2713" in rendered
+
+    def test_group_outcome_marker_failed(self):
+        ov = self._make_overlay()
+        for n in ov._visible:
+            if n.is_leaf and n.nodeid:
+                ov._outcomes[n.nodeid] = "passed"
+        # Make one fail
+        ov._outcomes["tests/test_foo.py::TestAlpha::test_one"] = "failed"
+        lines = ov.render()
+        rendered = "\n".join(lines)
+        assert "\u2717" in rendered
